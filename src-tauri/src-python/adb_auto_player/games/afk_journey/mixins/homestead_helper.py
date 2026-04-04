@@ -21,6 +21,9 @@ from adb_auto_player.util import SummaryGenerator
 class HomesteadHelperMixin(AFKJourneyBase):
     """Homestead helper mixin."""
 
+    # Templates — homestead main screen.
+    HOMESTEAD_OVERVIEW_CHECK_TEMPLATE = "homestead/homestead_overview_check.png"
+
     # Templates — Requests page.
     REQUESTS_ENTRY_TEMPLATE = "homestead/order_requests.png"
     NAVIGATE_TO_CRAFTING_TEMPLATE = "homestead/missing_item_navigate_to_crafting.png"
@@ -104,8 +107,6 @@ class HomesteadHelperMixin(AFKJourneyBase):
             )
             if navigate_arrow is None:
                 logging.info("Insufficient resources with no crafting option; stopping.")
-                self.press_back_button()
-                sleep(1)
                 break
 
             # Insufficient resources — go to workshop and craft.
@@ -131,6 +132,7 @@ class HomesteadHelperMixin(AFKJourneyBase):
                 logging.error("Failed to re-enter Requests page.")
                 break
 
+        self._return_to_homestead()
         logging.info("Total items crafted: %d", crafted_total)
 
     ############################## Requests Page ##############################
@@ -223,8 +225,6 @@ class HomesteadHelperMixin(AFKJourneyBase):
             )
         except GameTimeoutError:
             logging.warning("Workshop did not appear; returning.")
-            self.press_back_button()
-            sleep(1)
             return 0, False
 
         multiplier = self._ensure_x10_multiplier()
@@ -318,8 +318,6 @@ class HomesteadHelperMixin(AFKJourneyBase):
                 actual_crafted = i * multiplier
                 if harvest_used:
                     logging.info("Raw materials insufficient; harvest already used.")
-                    self.press_back_button()
-                    sleep(1)
                     SummaryGenerator.increment(
                         "Homestead Orders Helper", "Items Crafted", actual_crafted
                     )
@@ -362,6 +360,28 @@ class HomesteadHelperMixin(AFKJourneyBase):
         )
 
     ############################## Helper Functions ##############################
+
+    def _is_homestead_page(self) -> bool:
+        """Check if currently on the homestead main screen."""
+        return (
+            self.game_find_template_match(template=self.REQUESTS_ENTRY_TEMPLATE)
+            is not None
+            or self.game_find_template_match(
+                template=self.HOMESTEAD_OVERVIEW_CHECK_TEMPLATE
+            )
+            is not None
+        )
+
+    def _return_to_homestead(self, max_attempts: int = 10) -> None:
+        """Press back repeatedly until reaching the homestead main screen."""
+        for _ in range(max_attempts):
+            if self._is_homestead_page():
+                return
+            self.press_back_button()
+            sleep(2)
+        logging.warning(
+            "Failed to return to homestead after %d attempts.", max_attempts
+        )
 
     def _with_retries(
         self,
