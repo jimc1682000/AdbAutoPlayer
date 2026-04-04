@@ -3,17 +3,16 @@
 import logging
 import math
 import re
-from collections.abc import Callable
 from time import sleep
 
 import cv2
-from adb_auto_player.decorators import register_command
+from adb_auto_player.decorators import register_command, register_custom_routine_choice
 from adb_auto_player.exceptions import GameTimeoutError
 from adb_auto_player.games.afk_journey.base import AFKJourneyBase
 from adb_auto_player.games.afk_journey.gui_category import AFKJCategory
 from adb_auto_player.image_manipulation import Color, ColorFormat
 from adb_auto_player.models.decorators import GUIMetadata
-from adb_auto_player.models.geometry import Offset, Point
+from adb_auto_player.models.geometry import Point
 from adb_auto_player.ocr import PSM, TesseractBackend, TesseractConfig
 from adb_auto_player.util import SummaryGenerator
 
@@ -39,10 +38,6 @@ class HomesteadHelperMixin(AFKJourneyBase):
     CRAFTING_X5_TEMPLATE = "homestead/crafting_x5.png"
     CRAFTING_X10_TEMPLATE = "homestead/crafting_x10.png"
 
-    # Templates — order selling.
-    ORDER_COMPLETE_MAIN_TEMPLATE = "homestead/order_complete_main_page.png"
-    ORDER_COMPLETE_TEMPLATE = "homestead/order_complete.png"
-
     # Timeouts.
     REQUESTS_PAGE_TIMEOUT = 10.0
     CRAFTING_PAGE_TIMEOUT = 15.0
@@ -56,10 +51,6 @@ class HomesteadHelperMixin(AFKJourneyBase):
     CRAFTING_STOCK_SLICE = (923, 915, 80, 50)
     CRAFTING_REQUEST_SLICE = (953, 975, 50, 50)
 
-    # Order selling controls.
-    ORDER_COMPLETE_MAIN_OFFSET = Offset(-50, 50)
-    ORDER_COMPLETE_OFFSET = Offset(-50, 75)
-    ORDER_SELL_POINT = Point(620, 1620)
     POPUP_DISMISS_POINT = Point(540, 1800)
 
     @register_command(
@@ -69,7 +60,8 @@ class HomesteadHelperMixin(AFKJourneyBase):
             category=AFKJCategory.GAME_MODES,
         ),
     )
-    def navigate_production_buildings_for_crafting(self) -> None:
+    @register_custom_routine_choice(label="Homestead Orders Helper")
+    def run_homestead_orders(self) -> None:
         """Navigate through NPC requests to craft and fulfill orders."""
         self.start_up()
         self.navigate_to_homestead()
@@ -83,10 +75,10 @@ class HomesteadHelperMixin(AFKJourneyBase):
         craft_limit = self.settings.homestead.craft_item_limit
 
         while crafted_total < craft_limit:
-            if not self._has_quick_select():
-                logging.info("Quick Select not found; re-entering Requests page...")
+            if not self._has_homestead_request():
+                logging.info("No active request; re-entering Requests page...")
                 self.navigate_to_homestead()
-                if not self._enter_requests_page() or not self._has_quick_select():
+                if not self._enter_requests_page() or not self._has_homestead_request():
                     logging.info("No more requests.")
                     break
 
@@ -98,7 +90,7 @@ class HomesteadHelperMixin(AFKJourneyBase):
             ):
                 # Resources sufficient — tap "Delivered" (same position) + dismiss popup.
                 logging.info("Resources sufficient; tapping Delivered...")
-                self._dismiss_delivery()
+                self._deliver_order()
                 # Still on Requests page; loop back to find next Quick Select.
                 continue
 
@@ -111,7 +103,7 @@ class HomesteadHelperMixin(AFKJourneyBase):
 
             # Insufficient resources — go to workshop and craft.
             logging.info("Insufficient resources; navigating to workshop...")
-            crafted, did_harvest = self._navigate_to_workshop_and_craft(
+            crafted, did_harvest = self._enter_workshop_and_craft(
                 navigate_arrow=navigate_arrow,
                 remaining_crafts=craft_limit - crafted_total,
                 harvest_used=harvest_used,
@@ -189,7 +181,7 @@ class HomesteadHelperMixin(AFKJourneyBase):
         except GameTimeoutError:
             logging.warning("Harvest All button not found.")
 
-    def _dismiss_delivery(self) -> None:
+    def _deliver_order(self) -> None:
         """Tap 'Delivered' button and dismiss the reward popup."""
         sleep(1)
         self.tap(self.QUICK_SELECT_POINT)
@@ -202,7 +194,7 @@ class HomesteadHelperMixin(AFKJourneyBase):
 
     ############################## Workshop Crafting ##############################
 
-    def _navigate_to_workshop_and_craft(
+    def _enter_workshop_and_craft(
         self,
         *,
         navigate_arrow: object,
@@ -338,18 +330,19 @@ class HomesteadHelperMixin(AFKJourneyBase):
         )
         return actual_crafted, False
 
-    def _wait_for_crafting_ready(self) -> None:
+    def _wait_for_crafting_ready(self, max_attempts: int = 10) -> None:
         """Wait for crafting animation to complete."""
         sleep(self.CRAFTING_ANIMATION_WAIT)
 
-        while True:
+        for _ in range(max_attempts):
             if self.game_find_template_match(
                 template=self.CRAFTING_DECK_TEMPLATE,
             ):
                 return
             sleep(3)
+        logging.warning("Crafting deck not detected after %ds.", max_attempts * 3)
 
-    def _has_quick_select(self) -> bool:
+    def _has_homestead_request(self) -> bool:
         """Check if we are on the Requests page with an active request.
 
         Uses the Give Up template as a proxy — it is only visible when
@@ -382,29 +375,6 @@ class HomesteadHelperMixin(AFKJourneyBase):
         logging.warning(
             "Failed to return to homestead after %d attempts.", max_attempts
         )
-
-    def _with_retries(
-        self,
-        *,
-        action: Callable[[], None],
-        failure_log: str,
-        retries: int = 3,
-        on_retry: Callable[[], None] | None = None,
-    ) -> None:
-        """Retry wrapper for navigation steps."""
-        attempt = 0
-        while True:
-            attempt += 1
-            try:
-                action()
-                return
-            except GameTimeoutError:
-                if attempt >= retries:
-                    raise
-                logging.warning(failure_log)
-                if on_retry is not None:
-                    on_retry()
-                sleep(2)
 
     def _get_crafting_counts(
         self,
@@ -443,38 +413,3 @@ class HomesteadHelperMixin(AFKJourneyBase):
             return None
         return int("".join(digits))
 
-    ############################## Order Selling ##############################
-
-    def _handle_order_selling(self) -> int:
-        """Sell completed orders from the main page."""
-        order_complete = self.game_find_template_match(
-            template=self.ORDER_COMPLETE_MAIN_TEMPLATE,
-        )
-        if order_complete is None:
-            return 0
-
-        self.tap(order_complete.box.center + self.ORDER_COMPLETE_MAIN_OFFSET)
-        sleep(2)
-        return self._sell_completed_orders()
-
-    def _sell_completed_orders(self) -> int:
-        """Sell all completed orders on the orders page."""
-        sold_count = 0
-        while True:
-            order_complete = self.game_find_template_match(
-                template=self.ORDER_COMPLETE_TEMPLATE,
-            )
-            if order_complete is None:
-                break
-            self.tap(order_complete.box.center + self.ORDER_COMPLETE_OFFSET)
-            sleep(4)
-            self.tap(self.ORDER_SELL_POINT)
-            sleep(4)
-            self.tap(self.ORDER_SELL_POINT)
-            sleep(4)
-            if not self.handle_popup_messages():
-                self.tap(self.POPUP_DISMISS_POINT)
-                sleep(4)
-            sold_count += 1
-            SummaryGenerator.increment("Homestead Orders Helper", "Orders Sold")
-        return sold_count
