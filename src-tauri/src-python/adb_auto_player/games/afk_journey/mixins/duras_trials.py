@@ -9,6 +9,7 @@ from adb_auto_player.exceptions import (
     AutoPlayerWarningError,
 )
 from adb_auto_player.models.decorators import GUIMetadata
+from adb_auto_player.models.geometry import Point
 from adb_auto_player.models.image_manipulation import CropRegions
 from adb_auto_player.models.template_matching import TemplateMatchResult
 from adb_auto_player.util import SummaryGenerator
@@ -20,6 +21,8 @@ from ..gui_category import AFKJCategory
 
 class DurasTrialsMixin(AFKJourneyBase):
     """Dura's Trials Mixin."""
+
+    SWEEP_CONFIRM_POINT = Point(540, 1800)
 
     @register_command(
         name="DurasTrials",
@@ -36,11 +39,39 @@ class DurasTrialsMixin(AFKJourneyBase):
         self.navigate_to_duras_trials_screen()
 
         try:
-            self._handle_dura_screen()
+            if self.settings.duras_trials.sweep:
+                self._handle_sweep()
+            else:
+                self._handle_dura_screen()
         except AutoPlayerWarningError as e:
             logging.warning(f"{e}")
         except AutoPlayerError as e:
             logging.error(f"{e}")
+
+    def _handle_sweep(self) -> None:
+        """Sweep Dura's Trials for daily rewards."""
+        dura_state = self._dura_resolve_state()
+        if dura_state.template != "duras_trials/sweep.png":
+            logging.info("Sweep not available; stage not yet cleared.")
+            return
+
+        logging.info("Tapping Sweep...")
+        self.tap(dura_state)
+        sleep(2)
+
+        # TODO: Handle count selection UI (waiting for screenshots).
+
+        # Confirm sweep.
+        self.tap(self.SWEEP_CONFIRM_POINT)
+        sleep(2)
+
+        # Dismiss reward popup.
+        if not self.handle_popup_messages():
+            self.tap(self.SWEEP_CONFIRM_POINT)
+            sleep(1)
+
+        SummaryGenerator.increment("Dura's Trials", "Swept")
+        logging.info("Dura's Trials sweep completed.")
 
     def _dura_resolve_state(self) -> TemplateMatchResult:
         while True:
