@@ -27,6 +27,9 @@ class HomesteadHelperMixin(AFKJourneyBase):
     GIVE_UP_TEMPLATE = "homestead/order_page_give_up.png"
     INSUFFICIENT_RESOURCES_TEMPLATE = "homestead/insufficient_resources.png"
 
+    # Templates — homestead.
+    HARVEST_ALL_TEMPLATE = "homestead/harvest_all.png"
+
     # Templates — crafting workshop.
     CRAFTING_DECK_TEMPLATE = "homestead/deck_in_crafting_page.png"
     CRAFTING_X1_TEMPLATE = "homestead/crafting_x1.png"
@@ -73,6 +76,7 @@ class HomesteadHelperMixin(AFKJourneyBase):
             return
 
         crafted_total = 0
+        harvest_used = False
         craft_limit = self.settings.homestead.craft_item_limit
 
         while crafted_total < craft_limit:
@@ -106,10 +110,18 @@ class HomesteadHelperMixin(AFKJourneyBase):
 
             # Insufficient resources — go to workshop and craft.
             logging.info("Insufficient resources; navigating to workshop...")
-            crafted = self._navigate_to_workshop_and_craft(
+            crafted, did_harvest = self._navigate_to_workshop_and_craft(
                 navigate_arrow=navigate_arrow,
                 remaining_crafts=craft_limit - crafted_total,
+                harvest_used=harvest_used,
             )
+            if did_harvest:
+                harvest_used = True
+                # After harvest we're on homestead main screen already.
+                if not self._enter_requests_page():
+                    logging.error("Failed to re-enter Requests page after harvest.")
+                    break
+                continue
             if crafted == 0:
                 break
             crafted_total += crafted
@@ -120,10 +132,6 @@ class HomesteadHelperMixin(AFKJourneyBase):
                 break
 
         logging.info("Total items crafted: %d", crafted_total)
-        self.navigate_to_homestead()
-        sold_count = self._handle_order_selling()
-        if sold_count:
-            self.navigate_to_homestead()
 
     ############################## Requests Page ##############################
 
@@ -149,6 +157,36 @@ class HomesteadHelperMixin(AFKJourneyBase):
         except GameTimeoutError:
             return False
 
+    def _harvest_raw_materials(self) -> None:
+        """Handle insufficient raw materials during crafting.
+
+        Tap the first '>' to navigate to field, harvest all resources.
+        Caller is responsible for re-navigating afterwards.
+        """
+        navigate_arrow = self.game_find_template_match(
+            template=self.NAVIGATE_TO_CRAFTING_TEMPLATE,
+        )
+        if navigate_arrow is None:
+            logging.warning("No navigate arrow found on insufficient resources popup.")
+            self.press_back_button()
+            sleep(1)
+            return
+
+        self.tap(navigate_arrow)
+        sleep(3)
+
+        try:
+            harvest_btn = self.wait_for_template(
+                template=self.HARVEST_ALL_TEMPLATE,
+                timeout=self.REQUESTS_PAGE_TIMEOUT,
+                timeout_message="Harvest All button not found.",
+            )
+            logging.info("Harvesting all...")
+            self.tap(harvest_btn)
+            sleep(3)
+        except GameTimeoutError:
+            logging.warning("Harvest All button not found.")
+
     def _dismiss_delivery(self) -> None:
         """Tap 'Delivered' button and dismiss the reward popup."""
         sleep(1)
@@ -158,6 +196,7 @@ class HomesteadHelperMixin(AFKJourneyBase):
         if not self.handle_popup_messages():
             self.tap(self.POPUP_DISMISS_POINT)
             sleep(1)
+        SummaryGenerator.increment("Homestead Orders Helper", "Orders Sold")
 
     ############################## Workshop Crafting ##############################
 
@@ -166,8 +205,13 @@ class HomesteadHelperMixin(AFKJourneyBase):
         *,
         navigate_arrow: object,
         remaining_crafts: int,
-    ) -> int:
-        """Navigate from insufficient-resources popup to workshop and craft."""
+        harvest_used: bool = False,
+    ) -> tuple[int, bool]:
+        """Navigate from insufficient-resources popup to workshop and craft.
+
+        Returns:
+            tuple[int, bool]: (items crafted, whether harvest was triggered).
+        """
         self.tap(navigate_arrow)
         sleep(2)
 
@@ -181,12 +225,13 @@ class HomesteadHelperMixin(AFKJourneyBase):
             logging.warning("Workshop did not appear; returning.")
             self.press_back_button()
             sleep(1)
-            return 0
+            return 0, False
 
         multiplier = self._ensure_x10_multiplier()
         return self._craft_until_fulfilled(
             remaining_crafts=remaining_crafts,
             multiplier=multiplier,
+            harvest_used=harvest_used,
         )
 
     def _ensure_x10_multiplier(self) -> int:
@@ -224,10 +269,13 @@ class HomesteadHelperMixin(AFKJourneyBase):
         return 1
 
     def _craft_until_fulfilled(
-        self, *, remaining_crafts: int, multiplier: int = 1
-    ) -> int:
-        """Craft items in the workshop until Stock meets Request."""
-        crafted = 0
+        self, *, remaining_crafts: int, multiplier: int = 1, harvest_used: bool = False
+    ) -> tuple[int, bool]:
+        """Craft items in the workshop until Stock meets Request.
+
+        Returns:
+            tuple[int, bool]: (items crafted, whether harvest was triggered).
+        """
         ocr = TesseractBackend(config=TesseractConfig(psm=PSM.SINGLE_LINE))
 
         stock_count, request_count = self._get_crafting_counts(ocr)
@@ -237,30 +285,60 @@ class HomesteadHelperMixin(AFKJourneyBase):
                 stock_count,
                 request_count,
             )
-            return crafted
+            return 0, False
 
         needed = request_count - stock_count
         if needed <= 0:
             logging.info("Stock already meets request; no crafting needed.")
-            return crafted
+            return 0, False
 
         needed = min(needed, remaining_crafts)
         taps = math.ceil(needed / multiplier)
+        total_craft = taps * multiplier
         logging.info(
-            "Crafting %d items in %d taps x%d (stock=%d, request=%d).",
+            "Crafting %d items in %d taps x%d"
+            " (stock=%d, request=%d, craft=%d, estimated_stock=%d).",
             needed,
             taps,
             multiplier,
             stock_count,
             request_count,
+            total_craft,
+            stock_count + total_craft,
         )
 
-        for _ in range(taps):
+        for i in range(taps):
             self.tap(self.CRAFT_ITEM_POINT)
+            sleep(2)
+
+            # Check if insufficient raw materials popup appeared.
+            if self.game_find_template_match(
+                template=self.INSUFFICIENT_RESOURCES_TEMPLATE,
+            ):
+                actual_crafted = i * multiplier
+                if harvest_used:
+                    logging.info("Raw materials insufficient; harvest already used.")
+                    self.press_back_button()
+                    sleep(1)
+                    SummaryGenerator.increment(
+                        "Homestead Orders Helper", "Items Crafted", actual_crafted
+                    )
+                    return actual_crafted, False
+
+                logging.info("Raw materials insufficient during crafting.")
+                self._harvest_raw_materials()
+                SummaryGenerator.increment(
+                    "Homestead Orders Helper", "Items Crafted", actual_crafted
+                )
+                return actual_crafted, True
+
             self._wait_for_crafting_ready()
 
-        SummaryGenerator.increment("Homestead Orders Helper", "Items Crafted", needed)
-        return needed
+        actual_crafted = taps * multiplier
+        SummaryGenerator.increment(
+            "Homestead Orders Helper", "Items Crafted", actual_crafted
+        )
+        return actual_crafted, False
 
     def _wait_for_crafting_ready(self) -> None:
         """Wait for crafting animation to complete."""
