@@ -20,4 +20,4 @@ jobs:
         uses: lycheeverse/lychee-action@v2
         with:
           fail: true
-          args: --verbose --no-progress '**/*.md' --exclude 'https://lanyard.cnrad.dev/api/*'
+          args: --verbose --no-progress '**/*.md' --exclude 'https://lanyard.cnrad.dev/api/*' --exclude  'https://github.com/AdbAutoPlayer/AdbAutoPlayer/releases/*'
