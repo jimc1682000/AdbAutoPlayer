@@ -131,6 +131,9 @@ class DailiesSettings(BaseModel):
     raise_affinity: bool = Field(
         default=True, alias="Collect Affinity", title="Collect Affinity"
     )
+    guild_supremacy: bool = Field(
+        default=True, alias="Run Guild Supremacy", title="Run Guild Supremacy"
+    )
     duras_trials: bool = Field(
         default=True, alias="Run Dura's Trials", title="Run Dura's Trials"
     )
