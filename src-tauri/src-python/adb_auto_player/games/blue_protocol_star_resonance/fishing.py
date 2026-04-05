@@ -314,20 +314,24 @@ class Fishing(BlueProtocolStarResonance):
         return
 
     def start_reeling(self) -> None:
-        if not self.is_reeling:
-            if self.virtual_touch:
-                self.virtual_touch.hold(self.FISHING_POLE_BUTTON)
-            else:
-                self.device.hold_down(self.FISHING_POLE_BUTTON)
-            self.is_reeling = True
+        if self.is_reeling:
+            return
+
+        if self.virtual_touch:
+            self.virtual_touch.hold(self.FISHING_POLE_BUTTON)
+        else:
+            self.device.hold_down(self.FISHING_POLE_BUTTON)
+        self.is_reeling = True
 
     def stop_reeling(self) -> None:
-        if self.is_reeling:
-            if self.virtual_touch:
-                self.virtual_touch.release()
-            else:
-                self.device.hold_release(self.FISHING_POLE_BUTTON)
-            self.is_reeling = False
+        if not self.is_reeling:
+            return
+
+        if self.virtual_touch:
+            self.virtual_touch.release()
+        else:
+            self.device.hold_release(self.FISHING_POLE_BUTTON)
+        self.is_reeling = False
 
     def step_joystick_towards_fish(
         self,
@@ -461,9 +465,8 @@ def get_color_match_percentage(
     max_blue: int = 20,
 ) -> float:
     """Returns the percentage of pixels that match the color."""
-    mask = (
+    return (
         (image[:, :, 2] >= min_red)
         & (image[:, :, 1] <= max_green)
         & (image[:, :, 0] <= max_blue)
-    )
-    return np.sum(mask) / mask.size
+    ).mean()
