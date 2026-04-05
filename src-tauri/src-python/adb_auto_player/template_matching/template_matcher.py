@@ -254,7 +254,7 @@ def _suppress_close_matches(
         return []
 
     matches_array = np.array(matches)
-    suppressed: list[tuple[int, int]] = []  # type: ignore
+    suppressed: list[tuple[int, int]] = []
     dimension = 2
 
     for match in matches_array:
@@ -263,7 +263,7 @@ def _suppress_close_matches(
             np.linalg.norm(match_tuple - np.array(s)) >= min_distance
             for s in suppressed
         ):
-            suppressed.append(match_tuple)  # type: ignore
+            suppressed.append(match_tuple)
     return suppressed
 
 

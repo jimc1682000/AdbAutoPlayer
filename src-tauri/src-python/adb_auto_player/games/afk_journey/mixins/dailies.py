@@ -54,8 +54,8 @@ class DailiesMixin(AFKJourneyBase, ABC):
         self.claim_daily_rewards()
         self.buy_emporium()
         self.single_pull()
-        DreamRealmMixin().run_dream_realm(daily=True)  # type: ignore[abstract]
-        ArenaMixin().run_arena() if do_arena else logging.info("Arena battle disabled.")  # type: ignore[abstract]
+        DreamRealmMixin().run_dream_realm(daily=True)
+        ArenaMixin().run_arena() if do_arena else logging.info("Arena battle disabled.")
         self.claim_hamburger()
         if self.settings.dailies.raise_affinity:
             self.raise_hero_affinity()
@@ -63,12 +63,12 @@ class DailiesMixin(AFKJourneyBase, ABC):
             logging.info("Affinity farming disabled.")
         self.swap_essences()
         if self.settings.dailies.duras_trials:
-            DurasTrialsMixin().push_duras_trials()  # type: ignore[abstract]
+            DurasTrialsMixin().push_duras_trials()
         else:
             logging.info("Dura's Trials disabled.")
         if self.settings.legend_trials.towers:
-            SeasonLegendTrial().push_legend_trials()  # type: ignore[abstract]
-        AFKStagesMixin().push_afk_stages(season=True)  # type: ignore[abstract]
+            SeasonLegendTrial().push_legend_trials()
+        AFKStagesMixin().push_afk_stages(season=True)
 
     ############################# Daily Rewards ##############################
 

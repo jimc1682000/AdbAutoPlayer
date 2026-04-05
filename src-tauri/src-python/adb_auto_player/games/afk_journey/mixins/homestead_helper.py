@@ -212,7 +212,7 @@ class HomesteadHelperMixin(AFKJourneyBase):
             on_retry=lambda: (
                 self.tap(self.HOMESTEAD_BUILDINGS_SECTION_POINT),
                 sleep(2),
-            ),
+            ),  # ty: ignore[invalid-argument-type]
         )
 
     def _handle_crafting_requests(

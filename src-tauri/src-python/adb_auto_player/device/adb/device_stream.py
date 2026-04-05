@@ -61,7 +61,7 @@ def _get_codec_context() -> VideoCodecContext:
     decoder_name = _get_best_decoder(
         SettingsLoader.adb_settings().advanced.hardware_decoding
     )
-    return VideoCodecContext.create(decoder_name, "r")  # type: ignore[invalid-return-type]
+    return VideoCodecContext.create(decoder_name, "r")  # ty: ignore[invalid-return-type]
 
 
 class StreamingNotSupportedError(AutoPlayerWarningError):

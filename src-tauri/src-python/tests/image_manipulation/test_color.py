@@ -53,7 +53,7 @@ class TestColor:
         with pytest.raises(ValueError):
             Color.to_grayscale(
                 color_img,
-                color_format="XYZ",  # type: ignore[invalid-argument-type]
+                color_format="XYZ",  # ty: ignore[invalid-argument-type]
             )
 
     def test_to_rgb_valid_and_invalid(self):
