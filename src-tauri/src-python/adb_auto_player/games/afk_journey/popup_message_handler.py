@@ -115,6 +115,12 @@ misc_messages = [
         ignore=True,
     ),
     PopupMessage(
+        # Use a free Instant AFK attempt to get 120 minutes worth of AFK Rewards.
+        # Remaining attempts: x
+        text="Use a free Instant AFK attempt",
+        has_dont_remind_me=True,
+    ),
+    PopupMessage(
         # could just throw an exception here
         text="Daily Instant AFK attempt limit reached",
         # Daily Instant AFK attempt limit reached.
