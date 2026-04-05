@@ -17,6 +17,7 @@ from adb_auto_player.models.geometry import Point
 from adb_auto_player.models.image_manipulation import CropRegions
 
 from .duras_trials import DurasTrialsMixin
+from .guild_supremacy import GuildSupremacyMixin
 from .homestead_helper import HomesteadHelperMixin
 from .legend_trial import SeasonLegendTrial
 
@@ -63,6 +64,10 @@ class DailiesMixin(AFKJourneyBase, ABC):
         else:
             logging.info("Affinity farming disabled.")
         self.swap_essences()
+        if self.settings.dailies.guild_supremacy:
+            GuildSupremacyMixin().run_guild_supremacy()  # type: ignore[abstract]
+        else:
+            logging.info("Guild Supremacy disabled.")
         if self.settings.dailies.duras_trials:
             DurasTrialsMixin().push_duras_trials()  # type: ignore[abstract]
         else:

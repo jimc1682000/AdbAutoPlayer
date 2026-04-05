@@ -5,7 +5,7 @@ import re
 from time import sleep
 
 import cv2
-from adb_auto_player.decorators import register_command
+from adb_auto_player.decorators import register_command, register_custom_routine_choice
 from adb_auto_player.exceptions import GameTimeoutError
 from adb_auto_player.image_manipulation import Color, ColorFormat
 from adb_auto_player.models.decorators import GUIMetadata
@@ -36,6 +36,7 @@ class GuildSupremacyMixin(AFKJourneyBase):
             category=AFKJCategory.GAME_MODES,
         ),
     )
+    @register_custom_routine_choice(label="Guild Supremacy")
     def run_guild_supremacy(self) -> None:
         """Run Guild Supremacy boss battle."""
         self.start_up(device_streaming=False)
