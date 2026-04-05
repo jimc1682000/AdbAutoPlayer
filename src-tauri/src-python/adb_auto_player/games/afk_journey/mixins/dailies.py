@@ -1,10 +1,9 @@
 """Dailies Mixin."""
 
 import logging
-from abc import ABC
 from time import sleep
 
-from adb_auto_player.decorators import register_command
+from adb_auto_player.decorators import register_command, register_custom_routine_choice
 from adb_auto_player.exceptions import GameTimeoutError
 from adb_auto_player.games.afk_journey.base import AFKJourneyBase
 from adb_auto_player.games.afk_journey.gui_category import AFKJCategory
@@ -29,15 +28,9 @@ from .legend_trial import SeasonLegendTrial
 # We likely need more ABCs.
 
 
-class DailiesMixin(AFKJourneyBase, ABC):
+class DailiesMixin(AFKJourneyBase):
     """Dailies Mixin."""
 
-    def __init__(self) -> None:
-        """Initialize Dailies Mixin."""
-        super().__init__()
-        self.perform_essence_swap = False
-
-    # TODO should be broken up into components and registered for my custom routine
     @register_command(
         name="Dailies",
         gui=GUIMetadata(
@@ -49,7 +42,6 @@ class DailiesMixin(AFKJourneyBase, ABC):
         """Complete daily chores."""
         self.start_up(device_streaming=False)
         do_arena: bool = self.settings.dailies.arena_battle
-        self.navigate_to_world()
 
         self.claim_daily_rewards()
         self.buy_emporium()
@@ -72,8 +64,11 @@ class DailiesMixin(AFKJourneyBase, ABC):
 
     ############################# Daily Rewards ##############################
 
+    @register_custom_routine_choice(label="Claim Daily Rewards")
     def claim_daily_rewards(self) -> None:
         """Claim daily AFK rewards."""
+        self.start_up(device_streaming=False)
+        self.navigate_to_world()
         logging.debug("Open AFK Progress.")
         self.tap(Point(90, 1830))
         sleep(4)
@@ -117,8 +112,10 @@ class DailiesMixin(AFKJourneyBase, ABC):
 
     ############################# Mystical House ##############################
 
+    @register_custom_routine_choice(label="Buy Emporium")
     def buy_emporium(self) -> None:
         """Purchase single pull and optionally affinity items."""
+        self.start_up(device_streaming=False)
         logging.info("Entering Mystical House...")
         self.navigate_to_world()
         self.tap(Point(310, 1840))
@@ -288,15 +285,19 @@ class DailiesMixin(AFKJourneyBase, ABC):
             self.tap(Point(550, 100))  # Close purchased window
             sleep(1)
 
-            self.perform_essence_swap = True
-
+    @register_custom_routine_choice(label="Single Pull")
     def single_pull(self) -> None:
         """Complete a single pull."""
+        self.start_up(device_streaming=False)
         do_single: bool = self.settings.dailies.single_pull
 
         if not do_single:
             logging.info("Single pull disabled. Skipping.")
             return
+
+        self.navigate_to_world()
+        self.tap(Point(310, 1840))  # Enter Mystical House
+        sleep(self.FAST_TIMEOUT)
 
         logging.info("Navigating to Noble Tavern for daily single pull...")
         try:
@@ -350,8 +351,10 @@ class DailiesMixin(AFKJourneyBase, ABC):
 
     ############################# Hamburger Rewards ##############################
 
+    @register_custom_routine_choice(label="Claim Rewards")
     def claim_hamburger(self) -> None:
         """Claim rewards from hamburger menu."""
+        self.start_up(device_streaming=False)
         self.navigate_to_world()
 
         logging.info("Navigating to Hamburger.")
@@ -504,8 +507,10 @@ class DailiesMixin(AFKJourneyBase, ABC):
 
     ############################# Resonating Hall ##############################
 
+    @register_custom_routine_choice(label="Raise Affinity")
     def raise_hero_affinity(self) -> None:
         """Raise hero affinity with 3 clicks per day."""
+        self.start_up(device_streaming=False)
         self.navigate_to_world()
         sleep(5)
 
@@ -541,14 +546,12 @@ class DailiesMixin(AFKJourneyBase, ABC):
         self.tap(Point(995, 1090))  # Next hero
         sleep(1)
 
+    @register_custom_routine_choice(label="Swap Essences")
     def swap_essences(self) -> None:
         """Swap purchased essences."""
+        self.start_up(device_streaming=False)
         if not self.settings.dailies.buy_essences:
             logging.debug("Essence purchasing disabled. Skipping swap.")
-            return
-
-        if not self.perform_essence_swap:
-            logging.info("No essences purchased. Skipping swap.")
             return
 
         # Navigate to Resonating Hall explicitly.
