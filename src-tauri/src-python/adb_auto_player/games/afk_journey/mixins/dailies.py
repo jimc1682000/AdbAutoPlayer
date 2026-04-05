@@ -17,6 +17,7 @@ from adb_auto_player.models.geometry import Point
 from adb_auto_player.models.image_manipulation import CropRegions
 
 from .duras_trials import DurasTrialsMixin
+from .homestead_helper import HomesteadHelperMixin
 from .legend_trial import SeasonLegendTrial
 
 # from adb_auto_player.games.afk_journey.mixins import (
@@ -69,6 +70,10 @@ class DailiesMixin(AFKJourneyBase, ABC):
         if self.settings.legend_trials.towers:
             SeasonLegendTrial().push_legend_trials()  # type: ignore[abstract]
         AFKStagesMixin().push_afk_stages(season=True)  # type: ignore[abstract]
+        if self.settings.dailies.homestead:
+            HomesteadHelperMixin().run_homestead_orders()  # type: ignore[abstract]
+        else:
+            logging.info("Homestead Orders Helper disabled.")
 
     ############################# Daily Rewards ##############################
 
