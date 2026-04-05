@@ -33,6 +33,11 @@ class Navigation(PopupMessageHandler, ABC):
     CENTER_POINT = Point(x=1080 // 2, y=1920 // 2)
     RESONATING_HALL_POINT = Point(x=620, y=1830)
     BATTLE_MODES_POINT = Point(x=460, y=1830)
+    GUILD_POINT = Point(x=770, y=1830)
+
+    # Guild hall detection templates
+    GUILD_STORE_TEMPLATE = "navigation/guild/guild_store.png"
+    GUILD_CHALLENGE_TEMPLATE = "navigation/guild/guild_challenge.png"
 
     def navigate_to_world(self) -> None:
         """Navigate to world view. Previously default_state.
@@ -311,6 +316,58 @@ class Navigation(PopupMessageHandler, ABC):
             sleep(attempt)
             try:
                 self._navigate_to_battle_modes_screen()
+            except GameTimeoutError as e:
+                attempt += 1
+                if attempt >= max_attempts:
+                    raise e
+                else:
+                    continue
+            break
+        sleep(1)
+
+    def _is_guild_main_page(self) -> bool:
+        """Check if currently on the guild hall main page."""
+        return (
+            self.game_find_template_match(self.GUILD_STORE_TEMPLATE) is not None
+            or self.game_find_template_match(self.GUILD_CHALLENGE_TEMPLATE) is not None
+        )
+
+    def _navigate_to_guild(self) -> None:
+        self.tap(self.GUILD_POINT)
+        result = self.wait_for_any_template(
+            templates=[
+                self.GUILD_STORE_TEMPLATE,
+                self.GUILD_CHALLENGE_TEMPLATE,
+                "popup/quick_purchase.png",
+            ],
+            threshold=ConfidenceValue("75%"),
+            timeout=self.NAVIGATION_TIMEOUT,
+        )
+
+        if result.template != "popup/quick_purchase.png":
+            return
+
+        self.press_back_button()
+        sleep(1)
+
+        self.wait_for_any_template(
+            templates=[
+                self.GUILD_STORE_TEMPLATE,
+                self.GUILD_CHALLENGE_TEMPLATE,
+            ],
+            threshold=ConfidenceValue("75%"),
+            timeout=self.NAVIGATION_TIMEOUT,
+        )
+
+    def navigate_to_guild(self) -> None:
+        """Navigate to guild hall main page."""
+        attempt = 0
+        max_attempts = 3
+        while True:
+            _ = self.navigate_to_current_overview()
+            sleep(attempt)
+            try:
+                self._navigate_to_guild()
             except GameTimeoutError as e:
                 attempt += 1
                 if attempt >= max_attempts:
