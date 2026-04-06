@@ -83,8 +83,13 @@ class HomesteadHelperMixin(AFKJourneyBase):
         crafted_total = 0
         harvest_used = False
         processing_used = False
+        crafting_failures = 0
 
         while True:
+            if crafting_failures >= 2:
+                logging.warning("Crafting failed twice in a row; stopping.")
+                break
+
             if not self._has_homestead_request():
                 logging.info("No active request; re-entering Requests page...")
                 self.navigate_to_homestead()
@@ -101,6 +106,7 @@ class HomesteadHelperMixin(AFKJourneyBase):
                 # Resources sufficient — tap "Delivered" (same position) + dismiss popup.
                 logging.info("Resources sufficient; tapping Delivered...")
                 self._deliver_order()
+                crafting_failures = 0
                 # Still on Requests page; loop back to find next Quick Select.
                 continue
 
@@ -129,7 +135,9 @@ class HomesteadHelperMixin(AFKJourneyBase):
                     break
                 continue
             if crafted == 0:
-                break
+                crafting_failures += 1
+            else:
+                crafting_failures = 0
             crafted_total += crafted
             # Re-enter Requests page from scratch.
             self.navigate_to_homestead()
@@ -307,13 +315,7 @@ class HomesteadHelperMixin(AFKJourneyBase):
         self.tap(navigate_arrow)
         sleep(2)
 
-        try:
-            self.wait_for_template(
-                template=self.CRAFTING_DECK_TEMPLATE,
-                timeout=self.CRAFTING_PAGE_TIMEOUT,
-                timeout_message="Failed to navigate to crafting workshop.",
-            )
-        except GameTimeoutError:
+        if not self._wait_for_workshop():
             logging.warning("Workshop did not appear; returning.")
             return 0, None
 
@@ -438,7 +440,9 @@ class HomesteadHelperMixin(AFKJourneyBase):
                 )
                 return actual_crafted, None
 
-            self._wait_for_crafting_ready()
+            if not self._wait_for_crafting_ready():
+                logging.warning("Crafting blocked (e.g. stamina depleted); stopping.")
+                return 0, None
 
         actual_crafted = taps * multiplier
         SummaryGenerator.increment(
@@ -446,17 +450,35 @@ class HomesteadHelperMixin(AFKJourneyBase):
         )
         return actual_crafted, None
 
-    def _wait_for_crafting_ready(self, max_attempts: int = 10) -> None:
-        """Wait for crafting animation to complete."""
+    def _wait_for_crafting_ready(self, max_attempts: int = 10) -> bool:
+        """Wait for crafting animation to complete.
+
+        Returns:
+            bool: True if crafting deck reappeared, False if timed out.
+        """
         sleep(self.CRAFTING_ANIMATION_WAIT)
 
         for _ in range(max_attempts):
             if self.game_find_template_match(
                 template=self.CRAFTING_DECK_TEMPLATE,
             ):
-                return
+                return True
             sleep(3)
         logging.warning("Crafting deck not detected after %ds.", max_attempts * 3)
+        # Dismiss possible blocking popup (e.g. Stamina Bundle purchase page).
+        self.tap(self.POPUP_DISMISS_POINT)
+        sleep(2)
+        return False
+
+    def _wait_for_workshop(self) -> bool:
+        """Wait for the crafting workshop, dismissing popups each iteration."""
+        max_attempts = int(self.CRAFTING_PAGE_TIMEOUT / 2)
+        for _ in range(max_attempts):
+            if self.game_find_template_match(template=self.CRAFTING_DECK_TEMPLATE):
+                return True
+            self.handle_popup_messages()
+            sleep(2)
+        return False
 
     def _has_homestead_request(self) -> bool:
         """Check if we are on the Requests page with an active request.

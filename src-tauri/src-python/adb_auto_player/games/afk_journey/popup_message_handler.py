@@ -132,7 +132,7 @@ misc_messages = [
     ),
     PopupMessage(
         # Homestead: You have Process Cards available to upgrade. Upgrade now?
-        text="Process Cards available to upgrade",
+        text="Process Cards available",
         confirm_button_template="navigation/x.png",
     ),
 ]
