@@ -146,11 +146,7 @@ class ClaimAFKRewardsSettings(BaseModel):
 class HomesteadSettings(BaseModel):
     """Homestead Settings model."""
 
-    craft_item_limit: PositiveInt = Field(
-        default=80,
-        alias="Craft Item Limit",
-        title="Craft Item Limit",
-    )
+    pass
 
 
 class TitanReaverProxyBattlesSettings(BaseModel):

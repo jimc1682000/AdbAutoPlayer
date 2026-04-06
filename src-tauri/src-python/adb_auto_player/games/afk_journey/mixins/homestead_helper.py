@@ -13,6 +13,7 @@ from adb_auto_player.games.afk_journey.gui_category import AFKJCategory
 from adb_auto_player.image_manipulation import Color, ColorFormat
 from adb_auto_player.models.decorators import GUIMetadata
 from adb_auto_player.models.geometry import Point
+from adb_auto_player.models.image_manipulation import CropRegions
 from adb_auto_player.ocr import PSM, TesseractBackend, TesseractConfig
 from adb_auto_player.util import SummaryGenerator
 
@@ -38,6 +39,10 @@ class HomesteadHelperMixin(AFKJourneyBase):
     CRAFTING_X5_TEMPLATE = "homestead/crafting_x5.png"
     CRAFTING_X10_TEMPLATE = "homestead/crafting_x10.png"
 
+    # Templates — star rewards.
+    STAR_REWARDS_INDICATOR_TEMPLATE = "homestead/star_rewards_indicator.png"
+    REWARDS_OBTAINED_TEMPLATE = "homestead/rewards_obtained.png"
+
     # Timeouts.
     REQUESTS_PAGE_TIMEOUT = 10.0
     CRAFTING_PAGE_TIMEOUT = 15.0
@@ -52,6 +57,11 @@ class HomesteadHelperMixin(AFKJourneyBase):
     CRAFTING_REQUEST_SLICE = (953, 975, 50, 50)
 
     POPUP_DISMISS_POINT = Point(540, 1800)
+
+    # Processing building controls (Ore Refinery / Lumbermill / Essence Crucible).
+    PROCESSING_MAX_TEMPLATE = "homestead/max_count.png"
+    PROCESSING_ACTION_BUTTON = Point(564, 1795)
+
 
     @register_command(
         name="HomesteadOrdersHelper",
@@ -72,9 +82,9 @@ class HomesteadHelperMixin(AFKJourneyBase):
 
         crafted_total = 0
         harvest_used = False
-        craft_limit = self.settings.homestead.craft_item_limit
+        processing_used = False
 
-        while crafted_total < craft_limit:
+        while True:
             if not self._has_homestead_request():
                 logging.info("No active request; re-entering Requests page...")
                 self.navigate_to_homestead()
@@ -103,16 +113,19 @@ class HomesteadHelperMixin(AFKJourneyBase):
 
             # Insufficient resources — go to workshop and craft.
             logging.info("Insufficient resources; navigating to workshop...")
-            crafted, did_harvest = self._enter_workshop_and_craft(
+            crafted, action = self._enter_workshop_and_craft(
                 navigate_arrow=navigate_arrow,
-                remaining_crafts=craft_limit - crafted_total,
                 harvest_used=harvest_used,
+                processing_used=processing_used,
             )
-            if did_harvest:
+            if action == "harvest":
                 harvest_used = True
-                # After harvest we're on homestead main screen already.
+            elif action == "processing":
+                processing_used = True
+            if action is not None:
+                # After harvest/processing we're on homestead main screen.
                 if not self._enter_requests_page():
-                    logging.error("Failed to re-enter Requests page after harvest.")
+                    logging.error("Failed to re-enter Requests page.")
                     break
                 continue
             if crafted == 0:
@@ -123,6 +136,11 @@ class HomesteadHelperMixin(AFKJourneyBase):
             if not self._enter_requests_page():
                 logging.error("Failed to re-enter Requests page.")
                 break
+
+        # Collect daily star rewards before leaving.
+        self.navigate_to_homestead()
+        if self._enter_requests_page():
+            self.get_star_rewards()
 
         self._return_to_homestead()
         logging.info("Total items crafted: %d", crafted_total)
@@ -181,6 +199,52 @@ class HomesteadHelperMixin(AFKJourneyBase):
         except GameTimeoutError:
             logging.warning("Harvest All button not found.")
 
+    def _produce_at_processing_building(self) -> None:
+        """Navigate to a processing building and produce max materials.
+
+        Handles Ore Refinery (Smelt), Lumbermill (Shape),
+        and Essence Crucible (Refine). Expects the insufficient resources
+        popup with a > arrow to be visible.
+        Caller is responsible for re-navigating afterwards.
+        """
+        navigate_arrow = self.game_find_template_match(
+            template=self.NAVIGATE_TO_CRAFTING_TEMPLATE,
+        )
+        if navigate_arrow is None:
+            logging.warning("No navigate arrow found for processing building.")
+            self.press_back_button()
+            sleep(1)
+            return
+
+        self.tap(navigate_arrow)
+        sleep(3)
+
+        # Tap >>| to maximize production quantity.
+        max_btn = self.game_find_template_match(
+            template=self.PROCESSING_MAX_TEMPLATE,
+        )
+        if max_btn is None:
+            logging.warning("Max count button not found in processing building.")
+            self.press_back_button()
+            sleep(2)
+            return
+
+        self.tap(max_btn)
+        sleep(1)
+
+        # Tap the green action button (Smelt/Shape/Refine).
+        self.tap(self.PROCESSING_ACTION_BUTTON)
+        sleep(3)
+
+        # Dismiss Rewards Obtained popup.
+        if self.game_find_template_match(template=self.REWARDS_OBTAINED_TEMPLATE):
+            self.tap(self.POPUP_DISMISS_POINT)
+            sleep(2)
+
+        # Return to homestead main screen.
+        self.press_back_button()
+        sleep(2)
+
     def _deliver_order(self) -> None:
         """Tap 'Delivered' button and dismiss the reward popup."""
         sleep(1)
@@ -192,19 +256,53 @@ class HomesteadHelperMixin(AFKJourneyBase):
             sleep(1)
         SummaryGenerator.increment("Homestead Orders Helper", "Orders Sold")
 
+    def get_star_rewards(self) -> None:
+        """Collect available Daily Delivered Star Rewards on the Requests page."""
+        logging.info("Checking for daily star rewards...")
+
+        collected = 0
+        while True:
+            star_indicator = self.game_find_template_match(
+                template=self.STAR_REWARDS_INDICATOR_TEMPLATE,
+                crop_regions=CropRegions(bottom="80%", right="50%"),
+            )
+            if star_indicator is None:
+                break
+
+            self.tap(star_indicator)
+            sleep(2)
+
+            if self.game_find_template_match(
+                template=self.REWARDS_OBTAINED_TEMPLATE,
+            ):
+                collected += 1
+                SummaryGenerator.increment(
+                    "Homestead Orders Helper", "Star Rewards Collected"
+                )
+                self.tap(self.POPUP_DISMISS_POINT)
+                sleep(1)
+            else:
+                break
+
+        if collected:
+            logging.info("Collected %d star reward(s).", collected)
+        else:
+            logging.info("No claimable star rewards available.")
+
     ############################## Workshop Crafting ##############################
 
     def _enter_workshop_and_craft(
         self,
         *,
         navigate_arrow: object,
-        remaining_crafts: int,
         harvest_used: bool = False,
-    ) -> tuple[int, bool]:
+        processing_used: bool = False,
+    ) -> tuple[int, str | None]:
         """Navigate from insufficient-resources popup to workshop and craft.
 
         Returns:
-            tuple[int, bool]: (items crafted, whether harvest was triggered).
+            tuple[int, str | None]: (items crafted, action taken).
+            Action is "harvest", "processing", or None.
         """
         self.tap(navigate_arrow)
         sleep(2)
@@ -217,13 +315,13 @@ class HomesteadHelperMixin(AFKJourneyBase):
             )
         except GameTimeoutError:
             logging.warning("Workshop did not appear; returning.")
-            return 0, False
+            return 0, None
 
         multiplier = self._ensure_x10_multiplier()
         return self._craft_until_fulfilled(
-            remaining_crafts=remaining_crafts,
             multiplier=multiplier,
             harvest_used=harvest_used,
+            processing_used=processing_used,
         )
 
     def _ensure_x10_multiplier(self) -> int:
@@ -261,12 +359,17 @@ class HomesteadHelperMixin(AFKJourneyBase):
         return 1
 
     def _craft_until_fulfilled(
-        self, *, remaining_crafts: int, multiplier: int = 1, harvest_used: bool = False
-    ) -> tuple[int, bool]:
+        self,
+        *,
+        multiplier: int = 1,
+        harvest_used: bool = False,
+        processing_used: bool = False,
+    ) -> tuple[int, str | None]:
         """Craft items in the workshop until Stock meets Request.
 
         Returns:
-            tuple[int, bool]: (items crafted, whether harvest was triggered).
+            tuple[int, str | None]: (items crafted, action taken).
+            Action is "harvest", "processing", or None.
         """
         ocr = TesseractBackend(config=TesseractConfig(psm=PSM.SINGLE_LINE))
 
@@ -277,14 +380,13 @@ class HomesteadHelperMixin(AFKJourneyBase):
                 stock_count,
                 request_count,
             )
-            return 0, False
+            return 0, None
 
         needed = request_count - stock_count
         if needed <= 0:
             logging.info("Stock already meets request; no crafting needed.")
-            return 0, False
+            return 0, None
 
-        needed = min(needed, remaining_crafts)
         taps = math.ceil(needed / multiplier)
         total_craft = taps * multiplier
         logging.info(
@@ -308,19 +410,33 @@ class HomesteadHelperMixin(AFKJourneyBase):
                 template=self.INSUFFICIENT_RESOURCES_TEMPLATE,
             ):
                 actual_crafted = i * multiplier
-                if harvest_used:
-                    logging.info("Raw materials insufficient; harvest already used.")
-                    SummaryGenerator.increment(
-                        "Homestead Orders Helper", "Items Crafted", actual_crafted
-                    )
-                    return actual_crafted, False
-
-                logging.info("Raw materials insufficient during crafting.")
-                self._harvest_raw_materials()
                 SummaryGenerator.increment(
                     "Homestead Orders Helper", "Items Crafted", actual_crafted
                 )
-                return actual_crafted, True
+
+                # Count > arrows: 2 = harvest + building, 1 = building only.
+                arrows = self.find_all_template_matches(
+                    template=self.NAVIGATE_TO_CRAFTING_TEMPLATE,
+                )
+                arrow_count = len(arrows) if arrows else 0
+
+                if arrow_count >= 2 and not harvest_used:
+                    logging.info("Raw materials insufficient; harvesting...")
+                    self._harvest_raw_materials()
+                    return actual_crafted, "harvest"
+
+                if not processing_used:
+                    logging.info(
+                        "Processed materials insufficient; "
+                        "navigating to processing building..."
+                    )
+                    self._produce_at_processing_building()
+                    return actual_crafted, "processing"
+
+                logging.info(
+                    "Insufficient resources; harvest and processing already used."
+                )
+                return actual_crafted, None
 
             self._wait_for_crafting_ready()
 
@@ -328,7 +444,7 @@ class HomesteadHelperMixin(AFKJourneyBase):
         SummaryGenerator.increment(
             "Homestead Orders Helper", "Items Crafted", actual_crafted
         )
-        return actual_crafted, False
+        return actual_crafted, None
 
     def _wait_for_crafting_ready(self, max_attempts: int = 10) -> None:
         """Wait for crafting animation to complete."""
