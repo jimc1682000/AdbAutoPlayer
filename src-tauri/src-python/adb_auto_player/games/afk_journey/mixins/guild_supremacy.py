@@ -9,6 +9,7 @@ from adb_auto_player.decorators import register_command, register_custom_routine
 from adb_auto_player.exceptions import GameTimeoutError
 from adb_auto_player.image_manipulation import Color, ColorFormat
 from adb_auto_player.models.decorators import GUIMetadata
+from adb_auto_player.models.geometry import Point
 from adb_auto_player.models.image_manipulation import CropRegions
 from adb_auto_player.ocr import PSM, TesseractBackend, TesseractConfig
 from adb_auto_player.util import SummaryGenerator
@@ -27,6 +28,8 @@ class GuildSupremacyMixin(AFKJourneyBase):
     RANKINGS_TEMPLATE = "guild_supremacy/rankings.png"
     RANKINGS_GIFT_TEMPLATE = "guild_supremacy/rankings_gift.png"
     HAND_TEMPLATE = "navigation/guild/hand.png"
+    YESTERDAY_CONTRIBUTION_TEMPLATE = "guild_supremacy/yesterday_contribution.png"
+    BATTLE_ENDED_TEMPLATE = "guild_supremacy/battle_ended.png"
     BATTLE_COUNT_SLICE_HEIGHT = 30
 
     @register_command(
@@ -56,19 +59,26 @@ class GuildSupremacyMixin(AFKJourneyBase):
         if not self._navigate_to_guild_supremacy_boss():
             return False
 
-        # Dismiss "Yesterday's Contribution" popup if it appears.
-        tap_to_close = self.game_find_template_match("tap_to_close.png")
-        if tap_to_close:
-            logging.debug("Dismissing Yesterday's Contribution popup.")
-            self.tap(tap_to_close)
-            sleep(2)
+        # Wait for either the contribution popup or the boss screen.
+        try:
+            result = self.wait_for_any_template(
+                templates=[
+                    self.YESTERDAY_CONTRIBUTION_TEMPLATE,
+                    "battle/battle.png",
+                    self.REINFORCE_SEAL_TEMPLATE,
+                    self.HAND_TEMPLATE,
+                ],
+                timeout=10,
+            )
+            if result.template == self.YESTERDAY_CONTRIBUTION_TEMPLATE:
+                logging.debug("Dismissing Yesterday's Contribution popup.")
+                self.tap(Point(540, 1620))
+                sleep(2)
+        except GameTimeoutError:
+            pass
 
-            # Popup may have sent us back to guild main page.
-            if self._is_guild_main_page():
-                logging.debug("Returned to guild main page, re-entering...")
-                if not self._navigate_to_guild_supremacy_boss():
-                    return False
-                self._tap_hand_if_stuck()
+        # May have landed on guild map instead of boss screen.
+        self._tap_hand_if_stuck()
 
         if not self._is_seal_reinforced():
             return False
@@ -225,10 +235,15 @@ class GuildSupremacyMixin(AFKJourneyBase):
                 timeout_message="Failed to find Skip button.",
             )
             self.tap(skip)
-            sleep(3)
 
-            # Dismiss "BATTLE ENDED" screen.
-            self._dismiss_popup()
+            # Wait for "BATTLE ENDED" screen then dismiss it.
+            self.wait_for_template(
+                template=self.BATTLE_ENDED_TEMPLATE,
+                timeout=15,
+                timeout_message="BATTLE ENDED screen not found.",
+            )
+            self.tap(Point(540, 1620))
+            sleep(2)
 
             SummaryGenerator.increment("Guild Supremacy", "Battles")
         except GameTimeoutError as fail:
