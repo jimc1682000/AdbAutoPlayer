@@ -131,11 +131,11 @@ class DailiesSettings(BaseModel):
     raise_affinity: bool = Field(
         default=True, alias="Collect Affinity", title="Collect Affinity"
     )
-    homestead: bool = Field(
-        default=True, alias="Run Homestead Orders", title="Run Homestead Orders"
-    )
     duras_trials: bool = Field(
         default=True, alias="Run Dura's Trials", title="Run Dura's Trials"
+    )
+    homestead: bool = Field(
+        default=True, alias="Run Homestead Orders", title="Run Homestead Orders"
     )
 
 
