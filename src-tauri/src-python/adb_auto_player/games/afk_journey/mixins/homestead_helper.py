@@ -42,6 +42,7 @@ class HomesteadHelperMixin(AFKJourneyBase):
 
     # Templates — star rewards.
     SMALL_REWARDS_CHECKED_TEMPLATE = "homestead/small_rewards_checked.png"
+    STAR_DAILY_REWARDS_TEMPLATE = "homestead/star_daily_rewards.png"
     REWARDS_OBTAINED_TEMPLATE = "homestead/rewards_obtained.png"
 
     # Timeouts.
@@ -266,40 +267,44 @@ class HomesteadHelperMixin(AFKJourneyBase):
             sleep(1)
         SummaryGenerator.increment("Homestead Orders Helper", "Orders Sold")
 
-    STAR_REWARDS_TAP_POINT = Point(150, 140)
+    STAR_REWARDS_TAP_POINT = Point(292, 145)
 
     def get_star_rewards(self) -> None:
         """Collect available Daily Delivered Star Rewards on the Requests page."""
         logging.info("Checking for daily star rewards...")
 
-        collected = 0
-        while collected < 8:
-            if self.game_find_template_match(
-                template=self.SMALL_REWARDS_CHECKED_TEMPLATE,
-                crop_regions=CropRegions(bottom="85%", right="70%"),
-            ):
-                break
+        if self.game_find_template_match(
+            template=self.SMALL_REWARDS_CHECKED_TEMPLATE,
+            crop_regions=CropRegions(bottom="90%", right="50%"),
+        ):
+            logging.info("Star rewards already claimed.")
+            return
 
-            self.tap(self.STAR_REWARDS_TAP_POINT)
-            sleep(2)
+        self.tap(self.STAR_REWARDS_TAP_POINT)
+        sleep(2)
 
-            tap_to_close = self.game_find_template_match("tap_to_close.png")
-            if tap_to_close:
-                self.tap(tap_to_close)
-                sleep(1)
-                collected += 1
-                SummaryGenerator.increment(
-                    "Homestead Orders Helper", "Star Rewards Collected"
-                )
-            else:
-                self.press_back_button()
-                sleep(1)
-                break
+        if self.game_find_template_match(
+            template=self.REWARDS_OBTAINED_TEMPLATE,
+        ):
+            logging.info("Star rewards collected.")
+            self.tap(self.POPUP_DISMISS_POINT)
+            sleep(1)
+            SummaryGenerator.increment(
+                "Homestead Orders Helper", "Star Rewards Collected"
+            )
+            return
 
-        if collected:
-            logging.info("Collected %d star reward(s).", collected)
-        else:
-            logging.info("No claimable star rewards available.")
+        if self.game_find_template_match(
+            template=self.STAR_DAILY_REWARDS_TEMPLATE,
+            crop_regions=CropRegions(bottom="50%", right="70%"),
+        ):
+            logging.info("No rewards to claim.")
+            self.press_back_button()
+            sleep(1)
+            return
+
+        self.press_back_button()
+        sleep(1)
 
     ############################## Workshop Crafting ##############################
 
