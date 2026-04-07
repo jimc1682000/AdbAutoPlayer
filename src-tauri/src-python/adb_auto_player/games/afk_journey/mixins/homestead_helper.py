@@ -2,6 +2,7 @@
 
 import logging
 import math
+import os
 import re
 from time import sleep
 
@@ -62,7 +63,6 @@ class HomesteadHelperMixin(AFKJourneyBase):
     PROCESSING_MAX_TEMPLATE = "homestead/max_count.png"
     PROCESSING_ACTION_BUTTON = Point(564, 1795)
 
-
     @register_command(
         name="HomesteadOrdersHelper",
         gui=GUIMetadata(
@@ -114,7 +114,9 @@ class HomesteadHelperMixin(AFKJourneyBase):
                 template=self.NAVIGATE_TO_CRAFTING_TEMPLATE,
             )
             if navigate_arrow is None:
-                logging.info("Insufficient resources with no crafting option; stopping.")
+                logging.info(
+                    "Insufficient resources with no crafting option; stopping."
+                )
                 break
 
             # Insufficient resources — go to workshop and craft.
@@ -486,9 +488,7 @@ class HomesteadHelperMixin(AFKJourneyBase):
         Uses the Give Up template as a proxy — it is only visible when
         an NPC request is displayed (and Quick Select is available).
         """
-        return (
-            self.game_find_template_match(template=self.GIVE_UP_TEMPLATE) is not None
-        )
+        return self.game_find_template_match(template=self.GIVE_UP_TEMPLATE) is not None
 
     ############################## Helper Functions ##############################
 
@@ -529,7 +529,28 @@ class HomesteadHelperMixin(AFKJourneyBase):
             self.CRAFTING_REQUEST_SLICE,
             ocr,
         )
+        if stock_count is None or request_count is None:
+            self._save_debug_crops(screenshot)
         return stock_count, request_count
+
+    def _save_debug_crops(self, screenshot) -> None:
+        """Save debug images when OCR fails on crafting counts."""
+        try:
+            os.makedirs("debug", exist_ok=True)
+            cv2.imwrite("debug/homestead_crafting_screenshot.png", screenshot)
+            sx, sy, sw, sh = self.CRAFTING_STOCK_SLICE
+            cv2.imwrite(
+                "debug/homestead_crafting_stock_crop.png",
+                screenshot[sy : sy + sh, sx : sx + sw],
+            )
+            rx, ry, rw, rh = self.CRAFTING_REQUEST_SLICE
+            cv2.imwrite(
+                "debug/homestead_crafting_request_crop.png",
+                screenshot[ry : ry + rh, rx : rx + rw],
+            )
+            logging.debug("Debug images saved to debug/ directory.")
+        except Exception as e:
+            logging.debug("Failed to save debug images: %s", e)
 
     def _ocr_number_from_slice(
         self,
@@ -550,4 +571,3 @@ class HomesteadHelperMixin(AFKJourneyBase):
         if not digits:
             return None
         return int("".join(digits))
-
