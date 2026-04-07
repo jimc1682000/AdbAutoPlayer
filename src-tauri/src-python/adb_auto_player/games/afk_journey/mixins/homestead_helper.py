@@ -1,19 +1,20 @@
 """Homestead helper mixin."""
 
 import logging
+import math
+import os
 import re
-from collections.abc import Callable
 from time import sleep
-from typing import ClassVar
 
 import cv2
-from adb_auto_player.decorators import register_command
+from adb_auto_player.decorators import register_command, register_custom_routine_choice
 from adb_auto_player.exceptions import GameTimeoutError
 from adb_auto_player.games.afk_journey.base import AFKJourneyBase
 from adb_auto_player.games.afk_journey.gui_category import AFKJCategory
 from adb_auto_player.image_manipulation import Color, ColorFormat
 from adb_auto_player.models.decorators import GUIMetadata
-from adb_auto_player.models.geometry import Offset, Point
+from adb_auto_player.models.geometry import Point
+from adb_auto_player.models.image_manipulation import CropRegions
 from adb_auto_player.ocr import PSM, TesseractBackend, TesseractConfig
 from adb_auto_player.util import SummaryGenerator
 
@@ -21,47 +22,46 @@ from adb_auto_player.util import SummaryGenerator
 class HomesteadHelperMixin(AFKJourneyBase):
     """Homestead helper mixin."""
 
-    # Navigation points.
-    HOMESTEAD_BUILDINGS_SECTION_POINT = Point(680, 415)
-    PRODUCTION_BUILDING_ENTRY_POINT = Point(630, 1780)
-    PRODUCTION_SCREEN_POINT = Point(535, 1220)
-
-    # Templates.
+    # Templates — homestead main screen.
     HOMESTEAD_OVERVIEW_CHECK_TEMPLATE = "homestead/homestead_overview_check.png"
-    HOMESTEAD_OVERVIEW_PRODUCTION_TEMPLATE = (
-        "homestead/homestead_overview_production.png"
-    )
-    PRODUCTION_BUILDING_TEMPLATES: ClassVar[tuple[str, ...]] = (
-        "homestead/navigate_to_kitchen.png",
-        "homestead/navigate_to_forge.png",
-        "homestead/navigate_to_alchemy.png",
-    )
-    PRODUCTION_ACTION_BUTTON_TEMPLATES: ClassVar[tuple[str, ...]] = (
-        "homestead/cook_button.png",
-        "homestead/alchem_button.png",
-        "homestead/forge_button.png",
-    )
-    CRAFTING_REQUESTS_TEMPLATE = "homestead/requests.png"
-    CRAFTING_DECK_TEMPLATE = "homestead/deck_in_crafting_page.png"
-    ORDER_COMPLETE_MAIN_TEMPLATE = "homestead/order_complete_main_page.png"
-    ORDER_COMPLETE_TEMPLATE = "homestead/order_complete.png"
 
-    # Template polling controls.
-    PRODUCTION_ACTION_BUTTON_ATTEMPTS = 10
-    PRODUCTION_ACTION_BUTTON_DELAY = 3
+    # Templates — Requests page.
+    REQUESTS_ENTRY_TEMPLATE = "homestead/order_requests.png"
+    NAVIGATE_TO_CRAFTING_TEMPLATE = "homestead/missing_item_navigate_to_crafting.png"
+    GIVE_UP_TEMPLATE = "homestead/order_page_give_up.png"
+    INSUFFICIENT_RESOURCES_TEMPLATE = "homestead/insufficient_resources.png"
+
+    # Templates — homestead.
+    HARVEST_ALL_TEMPLATE = "homestead/harvest_all.png"
+
+    # Templates — crafting workshop.
+    CRAFTING_DECK_TEMPLATE = "homestead/deck_in_crafting_page.png"
+    CRAFTING_X1_TEMPLATE = "homestead/crafting_x1.png"
+    CRAFTING_X5_TEMPLATE = "homestead/crafting_x5.png"
+    CRAFTING_X10_TEMPLATE = "homestead/crafting_x10.png"
+
+    # Templates — star rewards.
+    STAR_REWARDS_INDICATOR_TEMPLATE = "homestead/star_rewards_indicator.png"
+    REWARDS_OBTAINED_TEMPLATE = "homestead/rewards_obtained.png"
+
+    # Timeouts.
+    REQUESTS_PAGE_TIMEOUT = 10.0
+    CRAFTING_PAGE_TIMEOUT = 15.0
+    CRAFTING_ANIMATION_WAIT = 7
+
+    # Requests page controls.
+    QUICK_SELECT_POINT = Point(540, 1620)
 
     # Crafting controls.
     CRAFT_ITEM_POINT = Point(530, 1700)
-    SELECT_ITEM_OFFSET = Offset(0, 345)
-    CRAFTING_REQUESTS_INITIAL_WAIT = 7
     CRAFTING_STOCK_SLICE = (923, 915, 80, 50)
     CRAFTING_REQUEST_SLICE = (953, 975, 50, 50)
 
-    # Order selling controls.
-    ORDER_COMPLETE_MAIN_OFFSET = Offset(-50, 50)
-    ORDER_COMPLETE_OFFSET = Offset(-50, 75)
-    ORDER_SELL_POINT = Point(620, 1620)
     POPUP_DISMISS_POINT = Point(540, 1800)
+
+    # Processing building controls (Ore Refinery / Lumbermill / Essence Crucible).
+    PROCESSING_MAX_TEMPLATE = "homestead/max_count.png"
+    PROCESSING_ACTION_BUTTON = Point(564, 1795)
 
     @register_command(
         name="HomesteadOrdersHelper",
@@ -70,239 +70,449 @@ class HomesteadHelperMixin(AFKJourneyBase):
             category=AFKJCategory.GAME_MODES,
         ),
     )
-    def navigate_production_buildings_for_crafting(self) -> None:
-        """Navigate through kitchen, forge, and alchemy for crafting."""
+    @register_custom_routine_choice(label="Homestead Orders Helper")
+    def run_homestead_orders(self) -> None:
+        """Navigate through NPC requests to craft and fulfill orders."""
         self.start_up()
-        logging.warning(
-            "This will try to handle all scenarios but you are recommended to put your"
-            " production buildings horizontally (at least not adjacent to each other)"
-        )
         self.navigate_to_homestead()
-        crafted_count = 0
-        building_templates = self.PRODUCTION_BUILDING_TEMPLATES
+
+        if not self._enter_requests_page():
+            logging.error("Failed to enter Requests page.")
+            return
+
+        crafted_total = 0
+        harvest_used = False
+        processing_used = False
+        crafting_failures = 0
 
         while True:
-            self.navigate_to_homestead_overview()
-            for building_template in building_templates:
-                remaining_crafts = (
-                    self.settings.homestead.craft_item_limit - crafted_count
-                )
-                if remaining_crafts <= 0:
-                    logging.info("Craft item limit reached: %s", crafted_count)
-                    self.navigate_to_homestead()
-                    return
-                if not self.navigate_to_production_building(
-                    building_template,
-                    from_overview=True,
-                ):
-                    self.navigate_to_homestead()
-                    return
-                crafted, limit_reached = self._handle_crafting_requests(
-                    remaining_crafts=remaining_crafts,
-                )
-                crafted_count += crafted
-                if limit_reached:
-                    logging.info("Craft item limit reached: %s", crafted_count)
-                    self.navigate_to_homestead()
-                    return
-            self.navigate_to_homestead()
-            sold_count = self._handle_order_selling()
-            if sold_count:
+            if crafting_failures >= 2:
+                logging.warning("Crafting failed twice in a row; stopping.")
+                break
+
+            if not self._has_homestead_request():
+                logging.info("No active request; re-entering Requests page...")
                 self.navigate_to_homestead()
+                if not self._enter_requests_page() or not self._has_homestead_request():
+                    logging.info("No more requests.")
+                    break
 
-    def navigate_to_homestead_overview(self) -> None:
-        """Navigate to the Homestead overview screen."""
-        logging.info("Navigating to Homestead overview...")
-        self._with_retries(
-            action=self._open_homestead_overview,
-            failure_log="Failed to reach Homestead overview, retrying navigation.",
-        )
-        self._enter_production_buildings_section()
-
-    def navigate_to_production_building(
-        self,
-        building_template: str,
-        *,
-        from_overview: bool = False,
-    ) -> bool:
-        """Navigate to a specific production building."""
-        if not from_overview:
-            self.navigate_to_homestead_overview()
-
-        building_button = self.wait_for_template(
-            template=building_template,
-            timeout=self.NAVIGATION_TIMEOUT,
-            timeout_message=(
-                f"Failed to find production building button: {building_template}"
-            ),
-        )
-        self.tap(building_button)
-        sleep(2)
-        # Static UI: tap the entry point, then wait for the production action button.
-        self.tap(self.PRODUCTION_BUILDING_ENTRY_POINT)
-        for _ in range(self.PRODUCTION_ACTION_BUTTON_ATTEMPTS):
-            if production_button := self.find_any_template(
-                list(self.PRODUCTION_ACTION_BUTTON_TEMPLATES)
-            ):
-                self.tap(production_button)
-                sleep(3)
-                return True
-            sleep(self.PRODUCTION_ACTION_BUTTON_DELAY)
-        logging.warning(
-            "Production action button not found after %ss; stopping run.",
-            self.PRODUCTION_ACTION_BUTTON_ATTEMPTS
-            * self.PRODUCTION_ACTION_BUTTON_DELAY,
-        )
-        return False
-
-    ############################## Helper Functions ##############################
-
-    def _with_retries(
-        self,
-        *,
-        action: Callable[[], None],
-        failure_log: str,
-        retries: int = 3,
-        on_retry: Callable[[], None] | None = None,
-    ) -> None:
-        """Retry wrapper for navigation steps."""
-        attempt = 0
-        while True:
-            attempt += 1
-            try:
-                action()
-                return
-            except GameTimeoutError:
-                if attempt >= retries:
-                    raise
-                logging.warning(failure_log)
-                if on_retry is not None:
-                    on_retry()
-                sleep(2)
-
-    def _open_homestead_overview(self) -> None:
-        """Open the Homestead overview using the overview button."""
-        sleep(2)  # allow UI to settle before matching
-        overview_check = self.wait_for_template(
-            template=self.HOMESTEAD_OVERVIEW_CHECK_TEMPLATE,
-            timeout=self.NAVIGATION_TIMEOUT,
-            timeout_message="Failed to find Homestead overview button.",
-        )
-        self.tap(overview_check)
-        sleep(2)
-
-    def _enter_production_buildings_section(self) -> None:
-        """Enter the production buildings section from overview."""
-        # Enter buildings from overview (tap fixed coordinates).
-        self.tap(self.HOMESTEAD_BUILDINGS_SECTION_POINT)
-        sleep(2)
-
-        def open_production() -> None:
-            production_button = self.wait_for_template(
-                template=self.HOMESTEAD_OVERVIEW_PRODUCTION_TEMPLATE,
-                timeout=self.NAVIGATION_TIMEOUT,
-                timeout_message="Failed to find Homestead production button.",
-            )
-            self.tap(production_button)
+            self.tap(self.QUICK_SELECT_POINT)
             sleep(2)
 
-        self._with_retries(
-            action=open_production,
-            failure_log="Failed to enter production buildings, retrying from overview.",
-            on_retry=lambda: (
-                self.tap(self.HOMESTEAD_BUILDINGS_SECTION_POINT),
-                sleep(2),
-            ),  # ty: ignore[invalid-argument-type]
-        )
+            if not self.game_find_template_match(
+                template=self.INSUFFICIENT_RESOURCES_TEMPLATE,
+            ):
+                # Resources sufficient — tap "Delivered" (same position) + dismiss popup.
+                logging.info("Resources sufficient; tapping Delivered...")
+                self._deliver_order()
+                crafting_failures = 0
+                # Still on Requests page; loop back to find next Quick Select.
+                continue
 
-    def _handle_crafting_requests(
+            navigate_arrow = self.game_find_template_match(
+                template=self.NAVIGATE_TO_CRAFTING_TEMPLATE,
+            )
+            if navigate_arrow is None:
+                logging.info(
+                    "Insufficient resources with no crafting option; stopping."
+                )
+                break
+
+            # Insufficient resources — go to workshop and craft.
+            logging.info("Insufficient resources; navigating to workshop...")
+            crafted, action = self._enter_workshop_and_craft(
+                navigate_arrow=navigate_arrow,
+                harvest_used=harvest_used,
+                processing_used=processing_used,
+            )
+            if action == "harvest":
+                harvest_used = True
+            elif action == "processing":
+                processing_used = True
+            if action is not None:
+                # After harvest/processing we're on homestead main screen.
+                if not self._enter_requests_page():
+                    logging.error("Failed to re-enter Requests page.")
+                    break
+                continue
+            if crafted == 0:
+                crafting_failures += 1
+            else:
+                crafting_failures = 0
+            crafted_total += crafted
+            # Re-enter Requests page from scratch.
+            self.navigate_to_homestead()
+            if not self._enter_requests_page():
+                logging.error("Failed to re-enter Requests page.")
+                break
+
+        # Collect daily star rewards before leaving.
+        self.navigate_to_homestead()
+        if self._enter_requests_page():
+            self.get_star_rewards()
+
+        self._return_to_homestead()
+        logging.info("Total items crafted: %d", crafted_total)
+
+    ############################## Requests Page ##############################
+
+    def _enter_requests_page(self) -> bool:
+        """Enter the Requests page from the homestead main screen."""
+        sleep(1)
+        requests_icon = self.game_find_template_match(
+            template=self.REQUESTS_ENTRY_TEMPLATE,
+        )
+        if requests_icon is None:
+            return False
+
+        self.tap(requests_icon)
+        sleep(2)
+
+        try:
+            self.wait_for_template(
+                template=self.GIVE_UP_TEMPLATE,
+                timeout=self.REQUESTS_PAGE_TIMEOUT,
+                timeout_message="Requests page did not load.",
+            )
+            return True
+        except GameTimeoutError:
+            return False
+
+    def _harvest_raw_materials(self) -> None:
+        """Handle insufficient raw materials during crafting.
+
+        Tap the first '>' to navigate to field, harvest all resources.
+        Caller is responsible for re-navigating afterwards.
+        """
+        navigate_arrow = self.game_find_template_match(
+            template=self.NAVIGATE_TO_CRAFTING_TEMPLATE,
+        )
+        if navigate_arrow is None:
+            logging.warning("No navigate arrow found on insufficient resources popup.")
+            self.press_back_button()
+            sleep(1)
+            return
+
+        self.tap(navigate_arrow)
+        sleep(3)
+
+        try:
+            harvest_btn = self.wait_for_template(
+                template=self.HARVEST_ALL_TEMPLATE,
+                timeout=self.REQUESTS_PAGE_TIMEOUT,
+                timeout_message="Harvest All button not found.",
+            )
+            logging.info("Harvesting all...")
+            self.tap(harvest_btn)
+            sleep(3)
+        except GameTimeoutError:
+            logging.warning("Harvest All button not found.")
+
+    def _produce_at_processing_building(self) -> None:
+        """Navigate to a processing building and produce max materials.
+
+        Handles Ore Refinery (Smelt), Lumbermill (Shape),
+        and Essence Crucible (Refine). Expects the insufficient resources
+        popup with a > arrow to be visible.
+        Caller is responsible for re-navigating afterwards.
+        """
+        navigate_arrow = self.game_find_template_match(
+            template=self.NAVIGATE_TO_CRAFTING_TEMPLATE,
+        )
+        if navigate_arrow is None:
+            logging.warning("No navigate arrow found for processing building.")
+            self.press_back_button()
+            sleep(1)
+            return
+
+        self.tap(navigate_arrow)
+        sleep(3)
+
+        # Tap >>| to maximize production quantity.
+        max_btn = self.game_find_template_match(
+            template=self.PROCESSING_MAX_TEMPLATE,
+        )
+        if max_btn is None:
+            logging.warning("Max count button not found in processing building.")
+            self.press_back_button()
+            sleep(2)
+            return
+
+        self.tap(max_btn)
+        sleep(1)
+
+        # Tap the green action button (Smelt/Shape/Refine).
+        self.tap(self.PROCESSING_ACTION_BUTTON)
+        sleep(3)
+
+        # Dismiss Rewards Obtained popup.
+        if self.game_find_template_match(template=self.REWARDS_OBTAINED_TEMPLATE):
+            self.tap(self.POPUP_DISMISS_POINT)
+            sleep(2)
+
+        # Return to homestead main screen.
+        self.press_back_button()
+        sleep(2)
+
+    def _deliver_order(self) -> None:
+        """Tap 'Delivered' button and dismiss the reward popup."""
+        sleep(1)
+        self.tap(self.QUICK_SELECT_POINT)
+        sleep(2)
+        # Dismiss full-page reward popup.
+        if not self.handle_popup_messages():
+            self.tap(self.POPUP_DISMISS_POINT)
+            sleep(1)
+        SummaryGenerator.increment("Homestead Orders Helper", "Orders Sold")
+
+    def get_star_rewards(self) -> None:
+        """Collect available Daily Delivered Star Rewards on the Requests page."""
+        logging.info("Checking for daily star rewards...")
+
+        collected = 0
+        while True:
+            star_indicator = self.game_find_template_match(
+                template=self.STAR_REWARDS_INDICATOR_TEMPLATE,
+                crop_regions=CropRegions(bottom="80%", right="50%"),
+            )
+            if star_indicator is None:
+                break
+
+            self.tap(star_indicator)
+            sleep(2)
+
+            if self.game_find_template_match(
+                template=self.REWARDS_OBTAINED_TEMPLATE,
+            ):
+                collected += 1
+                SummaryGenerator.increment(
+                    "Homestead Orders Helper", "Star Rewards Collected"
+                )
+                self.tap(self.POPUP_DISMISS_POINT)
+                sleep(1)
+            else:
+                break
+
+        if collected:
+            logging.info("Collected %d star reward(s).", collected)
+        else:
+            logging.info("No claimable star rewards available.")
+
+    ############################## Workshop Crafting ##############################
+
+    def _enter_workshop_and_craft(
         self,
         *,
-        remaining_crafts: int | None = None,
-    ) -> tuple[int, bool]:
-        """Handle crafting requests inside a production building.
+        navigate_arrow: object,
+        harvest_used: bool = False,
+        processing_used: bool = False,
+    ) -> tuple[int, str | None]:
+        """Navigate from insufficient-resources popup to workshop and craft.
 
         Returns:
-            tuple[int, bool]: Crafted count and whether the craft limit was hit.
+            tuple[int, str | None]: (items crafted, action taken).
+            Action is "harvest", "processing", or None.
         """
-        crafted = 0
-        ocr = TesseractBackend(config=TesseractConfig(psm=PSM.SINGLE_LINE))
-        while True:
-            request_icon = self.game_find_template_match(
-                template=self.CRAFTING_REQUESTS_TEMPLATE,
-            )
-            if request_icon is None:
-                self._return_to_production_building_selection()
-                return crafted, False
+        self.tap(navigate_arrow)
+        sleep(2)
 
-            request_target = request_icon.box.center + self.SELECT_ITEM_OFFSET
-            self.tap(request_target)
-            sleep(4)
+        if not self._wait_for_workshop():
+            logging.warning("Workshop did not appear; returning.")
+            return 0, None
 
-            stock_count, request_count = self._get_crafting_counts(ocr)
-            if stock_count is None or request_count is None:
-                logging.warning(
-                    "OCR failed for crafting counts (stock=%s, request=%s); skipping.",
-                    stock_count,
-                    request_count,
-                )
-                self._return_to_requests_list()
-                continue
+        multiplier = self._ensure_x10_multiplier()
+        return self._craft_until_fulfilled(
+            multiplier=multiplier,
+            harvest_used=harvest_used,
+            processing_used=processing_used,
+        )
 
-            needed = request_count - stock_count
-            if needed <= 0:
-                self._return_to_requests_list()
-                continue
+    def _ensure_x10_multiplier(self) -> int:
+        """Ensure crafting multiplier is set to x10.
 
-            if remaining_crafts is not None:
-                remaining = remaining_crafts - crafted
-                if remaining <= 0:
-                    return crafted, True
-                needed = min(needed, remaining)
+        Cycle: x1 -> x5 -> x10 -> x1. Detects current state and taps
+        the required number of times to reach x10.
 
-            for _ in range(needed):
-                self.tap(self.CRAFT_ITEM_POINT)
-                self._wait_for_crafting_deck()
-                crafted += 1
-                SummaryGenerator.increment("Homestead Orders Helper", "Items Crafted")
-                if remaining_crafts is None:
-                    limit_reached = False
-                else:
-                    limit_reached = crafted >= remaining_crafts
-                if limit_reached:
-                    return crafted, True
-            self._return_to_requests_list()
+        Returns:
+            int: The active multiplier (1, 5, or 10).
+        """
+        if self.game_find_template_match(template=self.CRAFTING_X10_TEMPLATE):
+            logging.debug("Multiplier already x10.")
+            return 10
 
-    def _return_to_production_building_selection(self) -> None:
-        """Return to the production building selection screen."""
-        self.navigate_to_homestead()
-        self.navigate_to_homestead_overview()
+        x1_btn = self.game_find_template_match(template=self.CRAFTING_X1_TEMPLATE)
+        if x1_btn is not None:
+            # x1 -> x5 -> x10 (tap twice)
+            logging.info("Multiplier is x1; switching to x10.")
+            self.tap(x1_btn)
+            sleep(1)
+            self.tap(x1_btn)
+            sleep(1)
+            return 10
 
-    def _wait_for_crafting_deck(
+        x5_btn = self.game_find_template_match(template=self.CRAFTING_X5_TEMPLATE)
+        if x5_btn is not None:
+            # x5 -> x10 (tap once)
+            logging.info("Multiplier is x5; switching to x10.")
+            self.tap(x5_btn)
+            sleep(1)
+            return 10
+
+        logging.warning("Could not detect multiplier; defaulting to x1.")
+        return 1
+
+    def _craft_until_fulfilled(
         self,
         *,
-        initial_wait: int | None = None,
-    ) -> None:
-        """Wait for crafting deck after starting a craft."""
-        initial_wait = (
-            self.CRAFTING_REQUESTS_INITIAL_WAIT
-            if initial_wait is None
-            else initial_wait
-        )
-        sleep(initial_wait)
+        multiplier: int = 1,
+        harvest_used: bool = False,
+        processing_used: bool = False,
+    ) -> tuple[int, str | None]:
+        """Craft items in the workshop until Stock meets Request.
 
-        while True:
+        Returns:
+            tuple[int, str | None]: (items crafted, action taken).
+            Action is "harvest", "processing", or None.
+        """
+        ocr = TesseractBackend(config=TesseractConfig(psm=PSM.SINGLE_LINE))
+
+        stock_count, request_count = self._get_crafting_counts(ocr)
+        if stock_count is None or request_count is None:
+            logging.warning(
+                "OCR failed for crafting counts (stock=%s, request=%s); skipping.",
+                stock_count,
+                request_count,
+            )
+            return 0, None
+
+        needed = request_count - stock_count
+        if needed <= 0:
+            logging.info("Stock already meets request; no crafting needed.")
+            return 0, None
+
+        taps = math.ceil(needed / multiplier)
+        total_craft = taps * multiplier
+        logging.info(
+            "Crafting %d items in %d taps x%d"
+            " (stock=%d, request=%d, craft=%d, estimated_stock=%d).",
+            needed,
+            taps,
+            multiplier,
+            stock_count,
+            request_count,
+            total_craft,
+            stock_count + total_craft,
+        )
+
+        for i in range(taps):
+            self.tap(self.CRAFT_ITEM_POINT)
+            sleep(2)
+
+            # Check if insufficient raw materials popup appeared.
+            if self.game_find_template_match(
+                template=self.INSUFFICIENT_RESOURCES_TEMPLATE,
+            ):
+                actual_crafted = i * multiplier
+                SummaryGenerator.increment(
+                    "Homestead Orders Helper", "Items Crafted", actual_crafted
+                )
+
+                # Count > arrows: 2 = harvest + building, 1 = building only.
+                arrows = self.find_all_template_matches(
+                    template=self.NAVIGATE_TO_CRAFTING_TEMPLATE,
+                )
+                arrow_count = len(arrows) if arrows else 0
+
+                if arrow_count >= 2 and not harvest_used:
+                    logging.info("Raw materials insufficient; harvesting...")
+                    self._harvest_raw_materials()
+                    return actual_crafted, "harvest"
+
+                if not processing_used:
+                    logging.info(
+                        "Processed materials insufficient; "
+                        "navigating to processing building..."
+                    )
+                    self._produce_at_processing_building()
+                    return actual_crafted, "processing"
+
+                logging.info(
+                    "Insufficient resources; harvest and processing already used."
+                )
+                return actual_crafted, None
+
+            if not self._wait_for_crafting_ready():
+                logging.warning("Crafting blocked (e.g. stamina depleted); stopping.")
+                return 0, None
+
+        actual_crafted = taps * multiplier
+        SummaryGenerator.increment(
+            "Homestead Orders Helper", "Items Crafted", actual_crafted
+        )
+        return actual_crafted, None
+
+    def _wait_for_crafting_ready(self, max_attempts: int = 10) -> bool:
+        """Wait for crafting animation to complete.
+
+        Returns:
+            bool: True if crafting deck reappeared, False if timed out.
+        """
+        sleep(self.CRAFTING_ANIMATION_WAIT)
+
+        for _ in range(max_attempts):
             if self.game_find_template_match(
                 template=self.CRAFTING_DECK_TEMPLATE,
             ):
-                return
+                return True
             sleep(3)
+        logging.warning("Crafting deck not detected after %ds.", max_attempts * 3)
+        # Dismiss possible blocking popup (e.g. Stamina Bundle purchase page).
+        self.tap(self.POPUP_DISMISS_POINT)
+        sleep(2)
+        return False
 
-    def _return_to_requests_list(self) -> None:
-        self.press_back_button()
-        sleep(4)
-        self.press_back_button()
-        sleep(4)
+    def _wait_for_workshop(self) -> bool:
+        """Wait for the crafting workshop, dismissing popups each iteration."""
+        max_attempts = int(self.CRAFTING_PAGE_TIMEOUT / 2)
+        for _ in range(max_attempts):
+            if self.game_find_template_match(template=self.CRAFTING_DECK_TEMPLATE):
+                return True
+            self.handle_popup_messages()
+            sleep(2)
+        return False
+
+    def _has_homestead_request(self) -> bool:
+        """Check if we are on the Requests page with an active request.
+
+        Uses the Give Up template as a proxy — it is only visible when
+        an NPC request is displayed (and Quick Select is available).
+        """
+        return self.game_find_template_match(template=self.GIVE_UP_TEMPLATE) is not None
+
+    ############################## Helper Functions ##############################
+
+    def _is_homestead_page(self) -> bool:
+        """Check if currently on the homestead main screen."""
+        return (
+            self.game_find_template_match(template=self.REQUESTS_ENTRY_TEMPLATE)
+            is not None
+            or self.game_find_template_match(
+                template=self.HOMESTEAD_OVERVIEW_CHECK_TEMPLATE
+            )
+            is not None
+        )
+
+    def _return_to_homestead(self, max_attempts: int = 10) -> None:
+        """Press back repeatedly until reaching the homestead main screen."""
+        for _ in range(max_attempts):
+            if self._is_homestead_page():
+                return
+            self.press_back_button()
+            sleep(2)
+        logging.warning(
+            "Failed to return to homestead after %d attempts.", max_attempts
+        )
 
     def _get_crafting_counts(
         self,
@@ -319,7 +529,28 @@ class HomesteadHelperMixin(AFKJourneyBase):
             self.CRAFTING_REQUEST_SLICE,
             ocr,
         )
+        if stock_count is None or request_count is None:
+            self._save_debug_crops(screenshot)
         return stock_count, request_count
+
+    def _save_debug_crops(self, screenshot) -> None:
+        """Save debug images when OCR fails on crafting counts."""
+        try:
+            os.makedirs("debug", exist_ok=True)
+            cv2.imwrite("debug/homestead_crafting_screenshot.png", screenshot)
+            sx, sy, sw, sh = self.CRAFTING_STOCK_SLICE
+            cv2.imwrite(
+                "debug/homestead_crafting_stock_crop.png",
+                screenshot[sy : sy + sh, sx : sx + sw],
+            )
+            rx, ry, rw, rh = self.CRAFTING_REQUEST_SLICE
+            cv2.imwrite(
+                "debug/homestead_crafting_request_crop.png",
+                screenshot[ry : ry + rh, rx : rx + rw],
+            )
+            logging.debug("Debug images saved to debug/ directory.")
+        except Exception as e:
+            logging.debug("Failed to save debug images: %s", e)
 
     def _ocr_number_from_slice(
         self,
@@ -340,37 +571,3 @@ class HomesteadHelperMixin(AFKJourneyBase):
         if not digits:
             return None
         return int("".join(digits))
-
-    def _handle_order_selling(self) -> int:
-        """Sell completed orders from the main page."""
-        order_complete = self.game_find_template_match(
-            template=self.ORDER_COMPLETE_MAIN_TEMPLATE,
-        )
-        if order_complete is None:
-            return 0
-
-        self.tap(order_complete.box.center + self.ORDER_COMPLETE_MAIN_OFFSET)
-        sleep(2)
-        return self._sell_completed_orders()
-
-    def _sell_completed_orders(self) -> int:
-        """Sell all completed orders on the orders page."""
-        sold_count = 0
-        while True:
-            order_complete = self.game_find_template_match(
-                template=self.ORDER_COMPLETE_TEMPLATE,
-            )
-            if order_complete is None:
-                break
-            self.tap(order_complete.box.center + self.ORDER_COMPLETE_OFFSET)
-            sleep(4)
-            self.tap(self.ORDER_SELL_POINT)
-            sleep(4)
-            self.tap(self.ORDER_SELL_POINT)
-            sleep(4)
-            if not self.handle_popup_messages():
-                self.tap(self.POPUP_DISMISS_POINT)
-                sleep(4)
-            sold_count += 1
-            SummaryGenerator.increment("Homestead Orders Helper", "Orders Sold")
-        return sold_count

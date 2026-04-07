@@ -136,6 +136,11 @@ misc_messages = [
         text="Exit the game",
         confirm_button_template="navigation/x.png",
     ),
+    PopupMessage(
+        # Homestead: You have Process Cards available to upgrade. Upgrade now?
+        text="Process Cards available",
+        confirm_button_template="navigation/x.png",
+    ),
 ]
 
 fishing_messages = [

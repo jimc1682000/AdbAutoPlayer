@@ -80,6 +80,7 @@ class Navigation(PopupMessageHandler, ABC):
     @staticmethod
     def _get_overview_navigation_templates() -> list[str]:
         return [
+            "navigation/homestead/leave_others_homestead.png",
             "navigation/homestead/homestead_enter.png",
             "navigation/homestead/homestead_invaded.png",
             "navigation/homestead/world.png",
@@ -122,6 +123,9 @@ class Navigation(PopupMessageHandler, ABC):
                 sleep(3)
             case "navigation/confirm.png":
                 self._handle_navigation_confirm(result)
+            case "navigation/homestead/leave_others_homestead.png":
+                self.tap(result)
+                sleep(5)
             case "navigation/dotdotdot.png" | "popup/quick_purchase.png":
                 self.press_back_button()
                 sleep(1)
