@@ -152,7 +152,12 @@ class DurasTrialsMixin(AFKJourneyBase):
             gray, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU
         )
 
-        ocr = TesseractBackend(config=TesseractConfig(psm=PSM.SINGLE_LINE))
+        ocr = TesseractBackend(
+            config=TesseractConfig(
+                psm=PSM.SINGLE_LINE,
+                char_whitelist="0123456/",
+            )
+        )
         text = ocr.extract_text(thresholded)
         match = re.search(r"(\d+)/(\d+)", text.strip())
         if match:
