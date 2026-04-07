@@ -172,6 +172,17 @@ def run_task(
     logger.setLevel(logging.DEBUG)
     logger.addHandler(queue_handler)
 
+    # File logging.
+    log_dir = app_config_dir / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / f"{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.log"
+    file_handler = logging.FileHandler(log_file, encoding="utf-8")
+    file_handler.setLevel(logging.DEBUG)
+    file_handler.setFormatter(
+        logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+    )
+    logger.addHandler(file_handler)
+
     def summary_callback(msg: str | None):
         # We are catching all exceptions here regardless
         # because we never want the summary to actually stop the process via error
