@@ -82,7 +82,7 @@ class AFKStagesSettings(BattleAllowsManualSettings):
 class DurasTrialsSettings(BattleAllowsManualSettings):
     """Dura's Trials Settings model."""
 
-    pass
+    force_sweep: bool = Field(default=False, alias="Force Sweep", title="Force Sweep")
 
 
 DEFAULT_TOWERS = list(TowerEnum.__members__.values())
