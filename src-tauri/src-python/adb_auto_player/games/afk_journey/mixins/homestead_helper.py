@@ -322,6 +322,7 @@ class HomesteadHelperMixin(AFKJourneyBase):
             return 0, None
 
         multiplier = self._ensure_x10_multiplier()
+        sleep(2)  # Wait for UI to settle after multiplier change.
         return self._craft_until_fulfilled(
             multiplier=multiplier,
             harvest_used=harvest_used,
@@ -533,22 +534,26 @@ class HomesteadHelperMixin(AFKJourneyBase):
             self._save_debug_crops(screenshot)
         return stock_count, request_count
 
+    DEBUG_DIR = "/tmp/adb_auto_player_debug"
+
     def _save_debug_crops(self, screenshot) -> None:
         """Save debug images when OCR fails on crafting counts."""
         try:
-            os.makedirs("debug", exist_ok=True)
-            cv2.imwrite("debug/homestead_crafting_screenshot.png", screenshot)
+            os.makedirs(self.DEBUG_DIR, exist_ok=True)
+            cv2.imwrite(
+                f"{self.DEBUG_DIR}/homestead_crafting_screenshot.png", screenshot
+            )
             sx, sy, sw, sh = self.CRAFTING_STOCK_SLICE
             cv2.imwrite(
-                "debug/homestead_crafting_stock_crop.png",
+                f"{self.DEBUG_DIR}/homestead_crafting_stock_crop.png",
                 screenshot[sy : sy + sh, sx : sx + sw],
             )
             rx, ry, rw, rh = self.CRAFTING_REQUEST_SLICE
             cv2.imwrite(
-                "debug/homestead_crafting_request_crop.png",
+                f"{self.DEBUG_DIR}/homestead_crafting_request_crop.png",
                 screenshot[ry : ry + rh, rx : rx + rw],
             )
-            logging.debug("Debug images saved to debug/ directory.")
+            logging.debug("Debug images saved to %s/", self.DEBUG_DIR)
         except Exception as e:
             logging.debug("Failed to save debug images: %s", e)
 
