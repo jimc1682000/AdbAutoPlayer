@@ -267,6 +267,12 @@ class HomesteadHelperMixin(AFKJourneyBase):
         SummaryGenerator.increment("Homestead Orders Helper", "Orders Sold")
 
     STAR_REWARDS_BAR_POINT = Point(150, 140)
+    REWARD_POSITIONS = [
+        Point(430, 490), Point(530, 490),
+        Point(430, 590), Point(530, 590),
+        Point(430, 690), Point(530, 690),
+        Point(430, 790), Point(530, 790),
+    ]
 
     def get_star_rewards(self) -> None:
         """Collect available Daily Delivered Star Rewards on the Requests page."""
@@ -279,43 +285,23 @@ class HomesteadHelperMixin(AFKJourneyBase):
             logging.info("All star rewards already claimed.")
             return
 
-        # Open Daily Rewards popup.
         self.tap(self.STAR_REWARDS_BAR_POINT)
         sleep(2)
 
-        # Find all already-checked positions inside the popup.
-        checked = self.find_all_template_matches(
-            template=self.SMALL_REWARDS_CHECKED_TEMPLATE,
-        )
-        checked_ys = {m.box.center.y for m in checked}
-        logging.debug("Found %d checked rewards at y=%s", len(checked), checked_ys)
-
-        # Fixed x positions for the two reward columns in the popup.
-        reward_columns_x = [430, 530]
-        # Fixed y positions for the four milestone rows.
-        reward_rows_y = [490, 590, 690, 790]
-
         collected = 0
-        for y in reward_rows_y:
-            for x in reward_columns_x:
-                # Skip if a ✓ is already near this position.
-                if any(abs(y - cy) < 40 for cy in checked_ys):
-                    continue
-
-                self.tap(Point(x, y))
+        for pos in self.REWARD_POSITIONS:
+            self.tap(pos)
+            sleep(1)
+            if self.game_find_template_match(
+                template=self.REWARDS_OBTAINED_TEMPLATE,
+            ):
+                collected += 1
+                SummaryGenerator.increment(
+                    "Homestead Orders Helper", "Star Rewards Collected"
+                )
+                self.tap(self.POPUP_DISMISS_POINT)
                 sleep(1)
 
-                if self.game_find_template_match(
-                    template=self.REWARDS_OBTAINED_TEMPLATE,
-                ):
-                    collected += 1
-                    SummaryGenerator.increment(
-                        "Homestead Orders Helper", "Star Rewards Collected"
-                    )
-                    self.tap(self.POPUP_DISMISS_POINT)
-                    sleep(1)
-
-        # Close Daily Rewards popup.
         self.press_back_button()
         sleep(1)
 
