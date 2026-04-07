@@ -3,12 +3,14 @@ import jpGeneral from "./jp_general.json";
 import jpAFKJourney from "./jp_afk_journey.json";
 import jpAFKJourneyHeroes from "./jp_afk_journey_heroes.json";
 import vn from "./vn.json";
+import zhTw from "./zh_tw.json";
 
 // Add Locale here
 export enum SupportedLocale {
   EN = "en",
   JP = "jp",
   VN = "vn",
+  ZH_TW = "zh_tw",
 }
 
 export function getLocaleOrDefault(value: string): SupportedLocale {
@@ -24,6 +26,7 @@ const locales: LocaleDictionary = {
     SupportedLocale.JP,
   ),
   [SupportedLocale.VN]: vn,
+  [SupportedLocale.ZH_TW]: zhTw,
 };
 
 type Translations = Record<string, string>;
