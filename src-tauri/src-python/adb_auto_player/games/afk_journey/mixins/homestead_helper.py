@@ -41,7 +41,8 @@ class HomesteadHelperMixin(AFKJourneyBase):
     CRAFTING_X10_TEMPLATE = "homestead/crafting_x10.png"
 
     # Templates — star rewards.
-    STAR_REWARDS_INDICATOR_TEMPLATE = "homestead/star_rewards_indicator.png"
+    SMALL_REWARDS_CHECKED_TEMPLATE = "homestead/small_rewards_checked.png"
+    STAR_DAILY_REWARDS_TEMPLATE = "homestead/star_daily_rewards.png"
     REWARDS_OBTAINED_TEMPLATE = "homestead/rewards_obtained.png"
 
     # Timeouts.
@@ -266,38 +267,44 @@ class HomesteadHelperMixin(AFKJourneyBase):
             sleep(1)
         SummaryGenerator.increment("Homestead Orders Helper", "Orders Sold")
 
+    STAR_REWARDS_TAP_POINT = Point(292, 145)
+
     def get_star_rewards(self) -> None:
         """Collect available Daily Delivered Star Rewards on the Requests page."""
         logging.info("Checking for daily star rewards...")
 
-        collected = 0
-        while True:
-            star_indicator = self.game_find_template_match(
-                template=self.STAR_REWARDS_INDICATOR_TEMPLATE,
-                crop_regions=CropRegions(bottom="80%", right="50%"),
+        if self.game_find_template_match(
+            template=self.SMALL_REWARDS_CHECKED_TEMPLATE,
+            crop_regions=CropRegions(bottom="90%", right="50%"),
+        ):
+            logging.info("Star rewards already claimed.")
+            return
+
+        self.tap(self.STAR_REWARDS_TAP_POINT)
+        sleep(2)
+
+        if self.game_find_template_match(
+            template=self.REWARDS_OBTAINED_TEMPLATE,
+        ):
+            logging.info("Star rewards collected.")
+            self.tap(self.POPUP_DISMISS_POINT)
+            sleep(1)
+            SummaryGenerator.increment(
+                "Homestead Orders Helper", "Star Rewards Collected"
             )
-            if star_indicator is None:
-                break
+            return
 
-            self.tap(star_indicator)
-            sleep(2)
+        if self.game_find_template_match(
+            template=self.STAR_DAILY_REWARDS_TEMPLATE,
+            crop_regions=CropRegions(bottom="50%", right="70%"),
+        ):
+            logging.info("No rewards to claim.")
+            self.press_back_button()
+            sleep(1)
+            return
 
-            if self.game_find_template_match(
-                template=self.REWARDS_OBTAINED_TEMPLATE,
-            ):
-                collected += 1
-                SummaryGenerator.increment(
-                    "Homestead Orders Helper", "Star Rewards Collected"
-                )
-                self.tap(self.POPUP_DISMISS_POINT)
-                sleep(1)
-            else:
-                break
-
-        if collected:
-            logging.info("Collected %d star reward(s).", collected)
-        else:
-            logging.info("No claimable star rewards available.")
+        self.press_back_button()
+        sleep(1)
 
     ############################## Workshop Crafting ##############################
 
@@ -322,6 +329,7 @@ class HomesteadHelperMixin(AFKJourneyBase):
             return 0, None
 
         multiplier = self._ensure_x10_multiplier()
+        sleep(2)  # Wait for UI to settle after multiplier change.
         return self._craft_until_fulfilled(
             multiplier=multiplier,
             harvest_used=harvest_used,
@@ -533,22 +541,26 @@ class HomesteadHelperMixin(AFKJourneyBase):
             self._save_debug_crops(screenshot)
         return stock_count, request_count
 
+    DEBUG_DIR = "/tmp/adb_auto_player_debug"
+
     def _save_debug_crops(self, screenshot) -> None:
         """Save debug images when OCR fails on crafting counts."""
         try:
-            os.makedirs("debug", exist_ok=True)
-            cv2.imwrite("debug/homestead_crafting_screenshot.png", screenshot)
+            os.makedirs(self.DEBUG_DIR, exist_ok=True)
+            cv2.imwrite(
+                f"{self.DEBUG_DIR}/homestead_crafting_screenshot.png", screenshot
+            )
             sx, sy, sw, sh = self.CRAFTING_STOCK_SLICE
             cv2.imwrite(
-                "debug/homestead_crafting_stock_crop.png",
+                f"{self.DEBUG_DIR}/homestead_crafting_stock_crop.png",
                 screenshot[sy : sy + sh, sx : sx + sw],
             )
             rx, ry, rw, rh = self.CRAFTING_REQUEST_SLICE
             cv2.imwrite(
-                "debug/homestead_crafting_request_crop.png",
+                f"{self.DEBUG_DIR}/homestead_crafting_request_crop.png",
                 screenshot[ry : ry + rh, rx : rx + rw],
             )
-            logging.debug("Debug images saved to debug/ directory.")
+            logging.debug("Debug images saved to %s/", self.DEBUG_DIR)
         except Exception as e:
             logging.debug("Failed to save debug images: %s", e)
 
