@@ -134,6 +134,9 @@ class DailiesSettings(BaseModel):
     duras_trials: bool = Field(
         default=True, alias="Run Dura's Trials", title="Run Dura's Trials"
     )
+    homestead: bool = Field(
+        default=True, alias="Run Homestead Orders", title="Run Homestead Orders"
+    )
 
 
 class ClaimAFKRewardsSettings(BaseModel):
@@ -143,11 +146,7 @@ class ClaimAFKRewardsSettings(BaseModel):
 class HomesteadSettings(BaseModel):
     """Homestead Settings model."""
 
-    craft_item_limit: PositiveInt = Field(
-        default=80,
-        alias="Craft Item Limit",
-        title="Craft Item Limit",
-    )
+    pass
 
 
 class TitanReaverProxyBattlesSettings(BaseModel):
