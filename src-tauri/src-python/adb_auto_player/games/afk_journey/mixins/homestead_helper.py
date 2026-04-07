@@ -41,7 +41,7 @@ class HomesteadHelperMixin(AFKJourneyBase):
     CRAFTING_X10_TEMPLATE = "homestead/crafting_x10.png"
 
     # Templates — star rewards.
-    STAR_REWARDS_INDICATOR_TEMPLATE = "homestead/star_rewards_indicator.png"
+    SMALL_REWARDS_CHECKED_TEMPLATE = "homestead/small_rewards_checked.png"
     REWARDS_OBTAINED_TEMPLATE = "homestead/rewards_obtained.png"
 
     # Timeouts.
@@ -266,33 +266,58 @@ class HomesteadHelperMixin(AFKJourneyBase):
             sleep(1)
         SummaryGenerator.increment("Homestead Orders Helper", "Orders Sold")
 
+    STAR_REWARDS_BAR_POINT = Point(150, 140)
+
     def get_star_rewards(self) -> None:
         """Collect available Daily Delivered Star Rewards on the Requests page."""
         logging.info("Checking for daily star rewards...")
 
+        if self.game_find_template_match(
+            template=self.SMALL_REWARDS_CHECKED_TEMPLATE,
+            crop_regions=CropRegions(bottom="85%", right="70%"),
+        ):
+            logging.info("All star rewards already claimed.")
+            return
+
+        # Open Daily Rewards popup.
+        self.tap(self.STAR_REWARDS_BAR_POINT)
+        sleep(2)
+
+        # Find all already-checked positions inside the popup.
+        checked = self.find_all_template_matches(
+            template=self.SMALL_REWARDS_CHECKED_TEMPLATE,
+        )
+        checked_ys = {m.box.center.y for m in checked}
+        logging.debug("Found %d checked rewards at y=%s", len(checked), checked_ys)
+
+        # Fixed x positions for the two reward columns in the popup.
+        reward_columns_x = [430, 530]
+        # Fixed y positions for the four milestone rows.
+        reward_rows_y = [490, 590, 690, 790]
+
         collected = 0
-        while True:
-            star_indicator = self.game_find_template_match(
-                template=self.STAR_REWARDS_INDICATOR_TEMPLATE,
-                crop_regions=CropRegions(bottom="80%", right="50%"),
-            )
-            if star_indicator is None:
-                break
+        for y in reward_rows_y:
+            for x in reward_columns_x:
+                # Skip if a ✓ is already near this position.
+                if any(abs(y - cy) < 40 for cy in checked_ys):
+                    continue
 
-            self.tap(star_indicator)
-            sleep(2)
-
-            if self.game_find_template_match(
-                template=self.REWARDS_OBTAINED_TEMPLATE,
-            ):
-                collected += 1
-                SummaryGenerator.increment(
-                    "Homestead Orders Helper", "Star Rewards Collected"
-                )
-                self.tap(self.POPUP_DISMISS_POINT)
+                self.tap(Point(x, y))
                 sleep(1)
-            else:
-                break
+
+                if self.game_find_template_match(
+                    template=self.REWARDS_OBTAINED_TEMPLATE,
+                ):
+                    collected += 1
+                    SummaryGenerator.increment(
+                        "Homestead Orders Helper", "Star Rewards Collected"
+                    )
+                    self.tap(self.POPUP_DISMISS_POINT)
+                    sleep(1)
+
+        # Close Daily Rewards popup.
+        self.press_back_button()
+        sleep(1)
 
         if collected:
             logging.info("Collected %d star reward(s).", collected)
