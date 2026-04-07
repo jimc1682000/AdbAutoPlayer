@@ -266,44 +266,35 @@ class HomesteadHelperMixin(AFKJourneyBase):
             sleep(1)
         SummaryGenerator.increment("Homestead Orders Helper", "Orders Sold")
 
-    STAR_REWARDS_BAR_POINT = Point(150, 140)
-    REWARD_POSITIONS = [
-        Point(430, 490), Point(530, 490),
-        Point(430, 590), Point(530, 590),
-        Point(430, 690), Point(530, 690),
-        Point(430, 790), Point(530, 790),
-    ]
+    STAR_REWARDS_TAP_POINT = Point(150, 140)
 
     def get_star_rewards(self) -> None:
         """Collect available Daily Delivered Star Rewards on the Requests page."""
         logging.info("Checking for daily star rewards...")
 
-        if self.game_find_template_match(
-            template=self.SMALL_REWARDS_CHECKED_TEMPLATE,
-            crop_regions=CropRegions(bottom="85%", right="70%"),
-        ):
-            logging.info("All star rewards already claimed.")
-            return
-
-        self.tap(self.STAR_REWARDS_BAR_POINT)
-        sleep(2)
-
         collected = 0
-        for pos in self.REWARD_POSITIONS:
-            self.tap(pos)
-            sleep(1)
+        while collected < 8:
             if self.game_find_template_match(
-                template=self.REWARDS_OBTAINED_TEMPLATE,
+                template=self.SMALL_REWARDS_CHECKED_TEMPLATE,
+                crop_regions=CropRegions(bottom="85%", right="70%"),
             ):
+                break
+
+            self.tap(self.STAR_REWARDS_TAP_POINT)
+            sleep(2)
+
+            tap_to_close = self.game_find_template_match("tap_to_close.png")
+            if tap_to_close:
+                self.tap(tap_to_close)
+                sleep(1)
                 collected += 1
                 SummaryGenerator.increment(
                     "Homestead Orders Helper", "Star Rewards Collected"
                 )
-                self.tap(self.POPUP_DISMISS_POINT)
+            else:
+                self.press_back_button()
                 sleep(1)
-
-        self.press_back_button()
-        sleep(1)
+                break
 
         if collected:
             logging.info("Collected %d star reward(s).", collected)
