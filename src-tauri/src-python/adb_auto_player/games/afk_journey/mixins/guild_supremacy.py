@@ -1,7 +1,6 @@
 """AFK Journey Guild Supremacy Mixin."""
 
 import logging
-import re
 from time import sleep
 
 import cv2
@@ -201,15 +200,15 @@ class GuildSupremacyMixin(AFKJourneyBase):
             gray, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU
         )
 
-        ocr = TesseractBackend(config=TesseractConfig(psm=PSM.SINGLE_LINE))
-        text = ocr.extract_text(thresholded)
-        match = re.match(r"(\d+)/(\d+)", text.strip())
-        if match:
-            remaining = int(match.group(1))
-            logging.info("Battle count: %s", text.strip())
-            return remaining > 0
-
-        return True
+        ocr = TesseractBackend(
+            config=TesseractConfig(
+                psm=PSM.SINGLE_LINE,
+                char_whitelist="01/",
+            )
+        )
+        text = ocr.extract_text(thresholded).strip()
+        logging.info("Battle count: %s", text)
+        return text != "0/1"
 
     def _battle(self) -> None:
         """Execute the boss battle."""

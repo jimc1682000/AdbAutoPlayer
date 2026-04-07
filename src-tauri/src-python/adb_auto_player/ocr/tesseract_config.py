@@ -14,6 +14,7 @@ class TesseractConfig:
     oem: OEM = OEM.DEFAULT
     psm: PSM = PSM.DEFAULT
     lang: Lang = Lang.ENGLISH
+    char_whitelist: str | None = None
 
     @property
     def lang_string(self) -> str:
@@ -23,4 +24,7 @@ class TesseractConfig:
     @property
     def config_string(self) -> str:
         """Get config string to be passed to tesseract binary."""
-        return f"--oem {self.oem.value} --psm {self.psm.value}"
+        base = f"--oem {self.oem.value} --psm {self.psm.value}"
+        if self.char_whitelist:
+            base += f" -c tessedit_char_whitelist={self.char_whitelist}"
+        return base
