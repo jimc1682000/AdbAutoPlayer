@@ -60,6 +60,38 @@
         },
       },
       {
+        callback: () =>
+          callStartTask({
+            label: "Set Display Size 1080x1920",
+            args: ["WMSize1080x1920"],
+            category: "Settings, Phone & Debug",
+          }),
+        isProcessRunning:
+          "Set Display Size 1080x1920" ===
+          ($profileStates[$activeProfile]?.active_task ?? null),
+        option: {
+          label: "Set Display Size 1080x1920",
+          args: ["WMSize1080x1920"],
+          category: "Settings, Phone & Debug",
+        },
+      },
+      {
+        callback: () =>
+          callStartTask({
+            label: "Reset Display Size",
+            args: ["WMSizeReset"],
+            category: "Settings, Phone & Debug",
+          }),
+        isProcessRunning:
+          "Reset Display Size" ===
+          ($profileStates[$activeProfile]?.active_task ?? null),
+        option: {
+          label: "Reset Display Size",
+          args: ["WMSizeReset"],
+          category: "Settings, Phone & Debug",
+        },
+      },
+      {
         callback: () => callDebug(),
         isProcessRunning:
           "Debug" === ($profileStates[$activeProfile]?.active_task ?? null),
