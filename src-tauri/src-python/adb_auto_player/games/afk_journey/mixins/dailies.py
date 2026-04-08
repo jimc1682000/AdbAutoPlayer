@@ -351,6 +351,13 @@ class DailiesMixin(AFKJourneyBase):
 
     ############################# Hamburger Rewards ##############################
 
+    @register_command(
+        name="ClaimRewards",
+        gui=GUIMetadata(
+            label="Claim Rewards",
+            category=AFKJCategory.GAME_MODES,
+        ),
+    )
     @register_custom_routine_choice(label="Claim Rewards")
     def claim_hamburger(self) -> None:
         """Claim rewards from hamburger menu."""
