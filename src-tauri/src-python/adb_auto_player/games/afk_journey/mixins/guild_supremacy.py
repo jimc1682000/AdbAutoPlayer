@@ -71,7 +71,7 @@ class GuildSupremacyMixin(AFKJourneyBase):
             )
             if result.template == self.YESTERDAY_CONTRIBUTION_TEMPLATE:
                 logging.debug("Dismissing Yesterday's Contribution popup.")
-                self.tap(Point(540, 1620))
+                self.press_back_button()
                 sleep(2)
         except GameTimeoutError:
             pass
