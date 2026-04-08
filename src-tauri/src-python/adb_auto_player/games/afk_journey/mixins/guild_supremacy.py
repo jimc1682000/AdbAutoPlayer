@@ -3,14 +3,10 @@
 import logging
 from time import sleep
 
-import cv2
 from adb_auto_player.decorators import register_command, register_custom_routine_choice
 from adb_auto_player.exceptions import GameTimeoutError
-from adb_auto_player.image_manipulation import Color, ColorFormat
 from adb_auto_player.models.decorators import GUIMetadata
-from adb_auto_player.models.geometry import Point
 from adb_auto_player.models.image_manipulation import CropRegions
-from adb_auto_player.ocr import PSM, TesseractBackend, TesseractConfig
 from adb_auto_player.util import SummaryGenerator
 
 from ..base import AFKJourneyBase
@@ -29,7 +25,7 @@ class GuildSupremacyMixin(AFKJourneyBase):
     HAND_TEMPLATE = "navigation/guild/hand.png"
     YESTERDAY_CONTRIBUTION_TEMPLATE = "guild_supremacy/yesterday_contribution.png"
     BATTLE_ENDED_TEMPLATE = "guild_supremacy/battle_ended.png"
-    BATTLE_COUNT_SLICE_HEIGHT = 30
+    BATTLE_COUNT_ZERO_TEMPLATE = "guild_supremacy/battle_count_zero.png"
 
     @register_command(
         name="GuildSupremacy",
@@ -176,39 +172,20 @@ class GuildSupremacyMixin(AFKJourneyBase):
                 sleep(2)
 
     def _has_battle_remaining(self) -> bool:
-        """Check if there are battles remaining via OCR on the Battle button count.
+        """Check if there are battles remaining via template match.
 
         Returns:
-            True if battles remain, False if 0 remaining.
+            True if battles remain, False if 0/1 detected.
         """
-        screenshot = self.get_screenshot()
-        battle_btn = self.game_find_template_match("battle/battle.png")
-        if battle_btn is None:
+        match = self.game_find_template_match(
+            self.BATTLE_COUNT_ZERO_TEMPLATE,
+            crop_regions=CropRegions(top="85%"),
+        )
+        if match:
+            logging.info("Battle count: 0/1, no battles remaining.")
             return False
-
-        x = battle_btn.box.top_left.x
-        y = battle_btn.box.top_left.y + battle_btn.box.height
-        w = battle_btn.box.width
-        h = self.BATTLE_COUNT_SLICE_HEIGHT
-
-        crop = screenshot[y : y + h, x : x + w]
-        if crop.size == 0:
-            return True
-
-        gray = Color.to_grayscale(crop, ColorFormat.BGR)
-        _, thresholded = cv2.threshold(
-            gray, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU
-        )
-
-        ocr = TesseractBackend(
-            config=TesseractConfig(
-                psm=PSM.SINGLE_LINE,
-                char_whitelist="01/",
-            )
-        )
-        text = ocr.extract_text(thresholded).strip()
-        logging.info("Battle count: %s", text)
-        return text.startswith("1")
+        logging.info("Battle count: 1/1, battle available.")
+        return True
 
     def _battle(self) -> None:
         """Execute the boss battle."""
