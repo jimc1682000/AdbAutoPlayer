@@ -394,7 +394,6 @@ class DailiesMixin(AFKJourneyBase):
             sleep(1)
         except GameTimeoutError as fail:
             logging.info(f"{fail} {self.LANG_ERROR}")
-            return
 
         logging.debug("Back.")  # TODO: Create generic back method.
         back = self.game_find_template_match("back.png")
