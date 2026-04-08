@@ -238,10 +238,10 @@ class GuildSupremacyMixin(AFKJourneyBase):
             # Wait for "BATTLE ENDED" screen then dismiss it.
             self.wait_for_template(
                 template=self.BATTLE_ENDED_TEMPLATE,
-                timeout=15,
+                timeout=30,
                 timeout_message="BATTLE ENDED screen not found.",
             )
-            self.tap(Point(540, 1620))
+            self.press_back_button()
             sleep(2)
 
             SummaryGenerator.increment("Guild Supremacy", "Battles")
