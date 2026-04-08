@@ -208,7 +208,7 @@ class GuildSupremacyMixin(AFKJourneyBase):
         )
         text = ocr.extract_text(thresholded).strip()
         logging.info("Battle count: %s", text)
-        return text != "0/1"
+        return text.startswith("1")
 
     def _battle(self) -> None:
         """Execute the boss battle."""
